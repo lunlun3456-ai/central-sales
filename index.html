@@ -4198,7 +4198,7 @@ async function bulkDecideApprovals(decision){
   renderAdminTab();
   setTimeout(function(){triggerSyncRefresh();},1500);
 }
-async function decideApproval(id,decision){ await fetch(WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:decision==='approve'?'approveApprovalRequest':'rejectApprovalRequest',id,approver:currentUser.name,approverRole:currentUser.role,approverStore:currentUser.store})}); showToast(decision==='approve'?(lang==='zh'?'已批准。':'Approved.'):(lang==='zh'?'已拒绝。':'Rejected.'),'success'); saveApprovals(getApprovals().map(r=>r.id===id?{...r,status:decision==='approve'?'approved':'rejected'}:r)); renderAdminTab(); setTimeout(()=>triggerSyncRefresh(),1500); }
+async function decideApproval(id,decision){ await fetch(WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:decision==='approve'?'approveApprovalRequest':'rejectApprovalRequest',id,approver:currentUser.name,approverRole:currentUser.role,approverStore:currentUser.store})}); showToast(decision==='approve'?(lang==='zh'?'已批准。':'Approved.'):(lang==='zh'?'已拒绝。':'Rejected.'),'success'); saveApprovals(getApprovals().map(r=>r.id===id?Object.assign({},r,{status:decision==='approve'?'approved':'rejected'}):r)); renderAdminTab(); setTimeout(()=>triggerSyncRefresh(),1500); }
 function renderAttendanceReport(users){ const days=attendanceReportMode==='weekly'?7:31; const start=new Date(attendanceDateFilter); start.setDate(start.getDate()-days+1); const rows=users.filter(u=>attendanceStoreFilter==='all'||u.store===attendanceStoreFilter).map(u=>{ const rec=getAllAttendance().filter(r=>r.username===u.username&&new Date(r.dateKey)>=start&&new Date(r.dateKey)<=new Date(attendanceDateFilter)); return {name:u.name||u.username,present:new Set(rec.filter(r=>r.type==='check_in'&&r.status!=='rejected').map(r=>r.dateKey)).size,late:rec.filter(r=>r.status==='late').length,early:rec.filter(r=>r.status==='early_leave').length}; }); return `<div style="display:flex;justify-content:space-between;align-items:center"><div style="font-size:13px;font-weight:800">${attendanceReportMode==='weekly'?'Weekly':'Monthly'} Attendance Summary</div><select onchange="attendanceReportMode=this.value;renderAdminTab()" style="width:auto;padding:6px 10px"><option value="weekly" ${attendanceReportMode==='weekly'?'selected':''}>Weekly</option><option value="monthly" ${attendanceReportMode==='monthly'?'selected':''}>Monthly</option></select></div>${rows.map(r=>`<div class="stat-row"><span class="stat-label">${r.name}</span><span class="stat-value" style="font-size:13px">P ${r.present} - L ${r.late} - E ${r.early}</span></div>`).join('')}`; }
 function renderZoneScheduleTools(branches,users){
   var ZH=lang==='zh'; var EN=lang==='en';
@@ -4330,9 +4330,9 @@ async function renderAdminTab() {
   const pending=[]; const active=[]; const resigned=[];
   Object.entries(allUsers).forEach(([uname,u])=>{
     const s=String(u.status||'active').toLowerCase();
-    if(s==='pending')  pending.push({...u,username:uname});
-    else if(s==='resigned'||s==='inactive'||s==='disabled') resigned.push({...u,username:uname,status:s});
-    else               active.push({...u,username:uname});
+    if(s==='pending')  pending.push(Object.assign({},u,{username:uname}));
+    else if(s==='resigned'||s==='inactive'||s==='disabled') resigned.push(Object.assign({},u,{username:uname,status:s}));
+    else               active.push(Object.assign({},u,{username:uname}));
   });
   const pendingHtml=pending.length>0?`
     <div class="pending-card">
