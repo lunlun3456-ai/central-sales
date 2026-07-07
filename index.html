@@ -4327,10 +4327,12 @@ async function renderAdminTab() {
   // If a newer render began while we were fetching, abandon this stale one
   if(_myRenderId!==_adminRenderSeq) return;
   const allUsers=cachedUsers;
-  const pending=[]; const active=[];
+  const pending=[]; const active=[]; const resigned=[];
   Object.entries(allUsers).forEach(([uname,u])=>{
-    if(u.status==='pending') pending.push({...u,username:uname});
-    else active.push({...u,username:uname});
+    const s=String(u.status||'active').toLowerCase();
+    if(s==='pending')  pending.push({...u,username:uname});
+    else if(s==='resigned'||s==='inactive'||s==='disabled') resigned.push({...u,username:uname,status:s});
+    else               active.push({...u,username:uname});
   });
   const pendingHtml=pending.length>0?`
     <div class="pending-card">
@@ -4342,13 +4344,62 @@ async function renderAdminTab() {
         <div class="user-row"><div class="user-avatar pending-av">${(u.name||u.username||'?')[0].toUpperCase()}</div><div class="user-info"><div class="user-name">@${u.username}</div><div class="user-meta">${u.name||''} - ${u.store||''} - ${u.phone||'N/A'} - ${u.role||'staff'}</div></div><div class="user-actions"><button class="btn-sm approve" onclick="approveUser('${u.username}')">${t('approveBtn')}</button><button class="btn-sm reject" onclick="rejectUser('${u.username}')">${t('rejectBtn')}</button></div></div>`).join('')}
     </div>`:`<div class="card" style="background:#f0fdf4;border:1.5px solid #bbf7d0;margin-bottom:14px"><div style="text-align:center;color:#166534;font-size:14px;font-weight:700;padding:6px">${t('noRequests')}</div></div>`;
   const activeHtml=active.map(u=>`
-    <div class="user-row"><div class="user-avatar">${(u.name||u.username||'?')[0].toUpperCase()}</div><div class="user-info"><div class="user-name">${u.name||u.username} <span class="role-tag ${u.role||'staff'}">${t(u.role||'staff')}</span></div><div class="user-meta">@${u.username} - ${u.store||''} - ${u.phone||'N/A'}</div></div><div class="user-actions"><button class="btn-sm edit" onclick="openEditUser('${u.username}')">${t('editUser')}</button> <button class="btn-sm" style="background:#fef3c7;color:#92400e;font-size:10px" onclick="adminClearDeviceBind('${u.username}')">📱 Reset</button>${u.username!=='admin'?`<button class="btn-sm del" onclick="deleteUser('${u.username}')">${t('deleteUser')}</button>`:''}</div></div>`).join('');
+    <div class="user-row">
+      <div class="user-avatar">${(u.name||u.username||'?')[0].toUpperCase()}</div>
+      <div class="user-info">
+        <div class="user-name">${u.name||u.username} <span class="role-tag ${u.role||'staff'}">${t(u.role||'staff')}</span></div>
+        <div class="user-meta">@${u.username} · ${u.store||''} · ${u.phone||'N/A'}</div>
+      </div>
+      <div class="user-actions">
+        <button class="btn-sm edit" onclick="openEditUser('${u.username}')">${t('editUser')}</button>
+        <button class="btn-sm" style="background:#fef3c7;color:#92400e;font-size:10px" onclick="adminClearDeviceBind('${u.username}')">📱 Reset</button>
+        ${u.username!=='admin'?`
+        <button class="btn-sm" style="background:#fff7ed;color:#c2410c;font-size:10px;border:1.5px solid #fed7aa" onclick="resignUser('${u.username}','${(u.name||u.username).replace(/'/g,"\\'")}')">🚪 Resign</button>
+        <button class="btn-sm del" onclick="deleteUser('${u.username}')">${t('deleteUser')}</button>`:''}
+      </div>
+    </div>`).join('');
+
+  // Resigned staff section
+  const resigned=users.filter(u=>String(u.status||'').toLowerCase()==='resigned');
+  const resignedHtml=resigned.length>0?`
+    <div style="margin-top:16px">
+      <details>
+        <summary style="font-size:14px;font-weight:800;color:#92400e;cursor:pointer;padding:10px 0;list-style:none;display:flex;align-items:center;gap:8px">
+          <span style="font-size:18px">🚪</span>
+          ${lang==='en'?'Resigned Staff':'Pekerja Berhenti'} (${resigned.length})
+          <span style="font-size:11px;color:#94a3b8;font-weight:600;margin-left:4px">${lang==='en'?'tap to expand':'ketik untuk buka'}</span>
+        </summary>
+        <div class="card" style="margin-top:8px;border:1.5px solid #fed7aa;background:#fff7ed">
+          ${resigned.map(u=>`
+            <div class="user-row" style="opacity:0.75">
+              <div class="user-avatar" style="background:#94a3b8">${(u.name||u.username||'?')[0].toUpperCase()}</div>
+              <div class="user-info">
+                <div class="user-name">${u.name||u.username}
+                  <span style="font-size:10px;background:#fee2e2;color:#b91c1c;border-radius:20px;padding:2px 8px;font-weight:700;margin-left:4px">🚪 ${lang==='en'?'Resigned':'Berhenti'}</span>
+                </div>
+                <div class="user-meta">@${u.username} · ${u.store||''} · ${u.phone||'N/A'}</div>
+              </div>
+              <div class="user-actions">
+                <button class="btn-sm" style="background:#d1fae5;color:#065f46;font-size:10px;border:1.5px solid #6ee7b7" onclick="rehireUser('${u.username}','${(u.name||u.username).replace(/'/g,"\\'")}')">✅ ${lang==='en'?'Re-hire':'Ambil Balik'}</button>
+                <button class="btn-sm del" onclick="deleteUser('${u.username}')">${t('deleteUser')}</button>
+              </div>
+            </div>`).join('')}
+        </div>
+      </details>
+    </div>`:'';
 
   document.getElementById('tab-admin').innerHTML=`
     <div class="card-header-flex" style="margin-bottom:14px"><h2 style="font-size:18px;font-weight:900">${t('adminTab')}</h2><button class="btn refresh-inline" onclick="renderAdminTab()">${t('refresh')}</button></div>
     ${renderOperationsDashboard()}
     ${canManageUsers()?pendingHtml:''}
-    ${canManageUsers()?`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div style="font-size:15px;font-weight:800">${t('userMgmt')}</div><button class="btn refresh-inline" onclick="openAddUser()" style="background:var(--success);color:#fff;border:none">${t('addUser')}</button></div><div class="card">${activeHtml||`<div class="empty-state"><p>No active users</p></div>`}</div>`:''}
+    ${canManageUsers()?`
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div style="font-size:15px;font-weight:800">${t('userMgmt')}</div>
+        <button class="btn refresh-inline" onclick="openAddUser()" style="background:var(--success);color:#fff;border:none">${t('addUser')}</button>
+      </div>
+      <div class="card">${activeHtml||`<div class="empty-state"><p>No active users</p></div>`}</div>
+      ${resignedHtml}
+    `:''}
     ${hasPerm('role_perm')?'<div id="perms-panel" style="margin-top:8px"></div>':''}
     ${hasPerm('monthly_report')?'<div id="monthly-report-panel"></div>':''}`;
   if(hasPerm('role_perm')) renderPermissionsPanel();
@@ -4424,6 +4475,44 @@ async function deleteUser(username) {
     if(changed) saveData('_device_bindings',b);
     showToast(t('userDeleted'),'success'); renderAdminTab();
   } catch(e){showToast('Error: '+e,'error');}
+}
+
+async function resignUser(username, name){
+  var EN=lang==='en';
+  if(!confirm(EN
+    ?'Mark "'+name+'" as Resigned?\n\nThey will be locked out immediately.\nAll records are kept. You can re-hire them anytime.'
+    :'Tandakan "'+name+'" sebagai Berhenti?\n\nMereka tidak boleh log masuk.\nSemua rekod disimpan.')) return;
+  showToast(EN?'Updating...':'Mengemaskini...','pending');
+  try{
+    // Write to Central GAS (user authority)
+    var cUrl=CENTRAL_GAS_URL&&!CENTRAL_GAS_URL.includes('PASTE_')?CENTRAL_GAS_URL:WEB_APP_URL;
+    await fetch(cUrl,{method:'POST',mode:'no-cors',cache:'no-cache',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:'saveUser',username,status:'resigned',updatedBy:currentUser.username})});
+    // Update local cache immediately
+    if(cachedUsers&&cachedUsers[username]) cachedUsers[username].status='resigned';
+    saveData('cached_users',cachedUsers);
+    showToast((EN?'"'+name+'" marked Resigned. Records preserved.':'"'+name+'" ditandakan Berhenti.'),'success');
+    renderAdminTab();
+  }catch(e){showToast('Error: '+e.message,'error');}
+}
+
+async function rehireUser(username, name){
+  var EN=lang==='en';
+  if(!confirm(EN
+    ?'Re-hire "'+name+'"?\n\nTheir account will be active again.'
+    :'Ambil balik "'+name+'"?\n\nAkaun mereka akan aktif semula.')) return;
+  showToast(EN?'Updating...':'Mengemaskini...','pending');
+  try{
+    var cUrl=CENTRAL_GAS_URL&&!CENTRAL_GAS_URL.includes('PASTE_')?CENTRAL_GAS_URL:WEB_APP_URL;
+    await fetch(cUrl,{method:'POST',mode:'no-cors',cache:'no-cache',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:'saveUser',username,status:'active',updatedBy:currentUser.username})});
+    if(cachedUsers&&cachedUsers[username]) cachedUsers[username].status='active';
+    saveData('cached_users',cachedUsers);
+    showToast((EN?'"'+name+'" re-hired! Account restored.':'"'+name+'" telah diambil balik!'),'success');
+    renderAdminTab();
+  }catch(e){showToast('Error: '+e.message,'error');}
 }
 
 // ============================================================
