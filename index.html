@@ -735,7 +735,7 @@ function fmtDateTimeUTC8(s){
 // ═══════════════════════════════════════════════════════════════
 // CENTRAL GAS — paste your Central DB GAS URL here after deploy
 // ═══════════════════════════════════════════════════════════════
-const CENTRAL_GAS_URL = 'https://script.google.com/macros/s/AKfycbyoCJEa3G-7uj2IIngkK_FuV4kCP6l_58-lcMuzfZjZS-sQY0XYScebMdO7f3eFmzmH/exec';
+const CENTRAL_GAS_URL = 'https://script.google.com/macros/s/AKfycbyARbifaRNDfU1StghVG08aRXxBcqh_Wr3yGSUcUpXc43LySJnD0yUbGOS9pZV2Vrzr/exec';
 
 // Company → Stores mapping — matches Central DB Companies sheet exactly
 const COMPANY_STORES = {
@@ -2382,6 +2382,8 @@ async function _doAppLogin(userMatch){
     try{syncMalaysiaTime();}catch(e){}
     try{startNotifScheduler();}catch(e){}
     try{saveData('attendance_records',[]);_serverAtt=[];_serverAttLoaded=false;fetchServerAttendance();}catch(e){}
+    // Fetch leave records from Central DB spreadsheet
+    try{ fetchLeavesFromCentral(); }catch(e){}
     if(WEB_APP_URL&&WEB_APP_URL.length>20){
       try{recordLoginDevice();}catch(e){}
       setTimeout(function(){try{triggerSyncRefresh();}catch(e){}},1500);
@@ -3490,7 +3492,14 @@ function _renderAttendanceContent(){
       +(!inTime&&!inRejected?'<div style="font-size:11px;color:#94a3b8;text-align:center;margin-top:6px">'+(ZH?'点击签到开始今日工作':'Tap Check In to start your day')+'</div>':'')
     +'</div>'
     +(todayAll.length?'<div class="card" style="margin-bottom:10px"><div class="card-title" style="display:flex;align-items:center;gap:6px">📋 '+(ZH?'今日记录':'Today\'s Activity')+'<span style="font-size:10px;background:#f1f5f9;color:#64748b;border-radius:20px;padding:1px 8px;font-weight:700">'+todayAll.length+'</span></div>'+todayRows+'</div>':'')
-    +(recent.length?'<div class="card"><div class="card-title">'+(ZH?'近期记录':'Recent History')+'</div>'+recRows+'</div>':'');
+    +(recent.length?'<div class="card"><div class="card-title">'+(ZH?'近期记录':'Recent History')+'</div>'+recRows+'</div>':'')
+    +'<div class="card" id="leave-calendar-card">'
+      +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'
+        +'<div class="card-title" style="margin:0">📆 '+(ZH?'请假/休假 日历':'Leave & Off Day Calendar')+'</div>'
+        +(_canFix?'<button class="btn-sm" style="background:#1e3a8a;color:#fff;font-size:11px" onclick="openAddLeaveModal()">+ '+(ZH?'添加':'Add')+'</button>':'')
+      +'</div>'
+      +'<div id="leave-calendar-inner">'+renderLeaveCalendar()+'</div>'
+    +'</div>';
   var btns=document.getElementById('att-btns');
   if(btns){
     var b1=document.createElement('button'); b1.className='btn success';
@@ -3503,6 +3512,268 @@ function _renderAttendanceContent(){
     b2.onclick=function(){confirmAttendance('check_out');};
     btns.appendChild(b1); btns.appendChild(b2);
   }
+}
+
+// ── Leave / Off Day Calendar ──────────────────────────────────
+
+// Leave types
+var LEAVE_TYPES=[
+  {key:'off',      label:'Off Day',    labelMs:'Hari Rehat',    color:'#6366f1', bg:'#ede9fe', icon:'🏖️'},
+  {key:'sick',     label:'Sick Leave', labelMs:'Cuti Sakit',    color:'#ef4444', bg:'#fee2e2', icon:'🤒'},
+  {key:'annual',   label:'Annual Leave',labelMs:'Cuti Tahunan', color:'#10b981', bg:'#d1fae5', icon:'🌴'},
+  {key:'emergency',label:'Emergency',  labelMs:'Kecemasan',     color:'#f59e0b', bg:'#fef3c7', icon:'🚨'},
+  {key:'unpaid',   label:'Unpaid',     labelMs:'Tidak Berbayar',color:'#94a3b8', bg:'#f1f5f9', icon:'📋'},
+];
+
+function getLeaveTypeInfo(key){
+  return LEAVE_TYPES.find(function(t){return t.key===key;})||LEAVE_TYPES[0];
+}
+
+async function fetchLeavesFromCentral(){
+  var centralUrl=CENTRAL_GAS_URL&&!CENTRAL_GAS_URL.includes('PASTE_')?CENTRAL_GAS_URL:'';
+  if(!centralUrl) return;
+  try{
+    var resp=await fetch(centralUrl+'?action=getLeaves&store='+encodeURIComponent(currentUser.store)+'&t='+Date.now(),
+      {method:'GET',cache:'no-cache'});
+    var data=await resp.json();
+    if(data&&Array.isArray(data.leaves)){
+      saveData('staff_leaves',data.leaves);
+      // Refresh calendar if on attendance tab
+      var ci=document.getElementById('leave-calendar-inner');
+      if(ci) ci.innerHTML=renderLeaveCalendar();
+    }
+  }catch(e){ console.warn('fetchLeaves failed:',e.message); }
+}
+
+// Load leaves from localStorage (synced from Central DB)
+function getLeaves(){
+  return loadData('staff_leaves',[]).filter(function(l){
+    // Show own leaves for staff/supervisor; show store leaves for admin/manager
+    var isExec=['admin','manager','boss'].includes(currentUser.role);
+    return isExec ? l.store===currentUser.store : l.username===currentUser.username;
+  });
+}
+
+function saveLeaveRecord(rec){
+  var all=loadData('staff_leaves',[]);
+  var idx=all.findIndex(function(l){return l.id===rec.id;});
+  if(idx>=0) all[idx]=rec; else all.push(rec);
+  saveData('staff_leaves',all);
+}
+
+function deleteLeaveRecord(id){
+  var all=loadData('staff_leaves',[]).filter(function(l){return l.id!==id;});
+  saveData('staff_leaves',all);
+}
+
+function renderLeaveCalendar(){
+  var EN=lang==='en';
+  var leaves=getLeaves();
+  // Sort by date desc
+  leaves.sort(function(a,b){return String(b.dateFrom).localeCompare(String(a.dateFrom));});
+
+  // Build mini month calendar for current month
+  var now=new Date();
+  var yr=now.getFullYear(), mo=now.getMonth();
+  var monthKey=yr+'-'+(mo<9?'0':'')+(mo+1);
+  var firstDay=new Date(yr,mo,1).getDay(); // 0=Sun
+  var daysInMonth=new Date(yr,mo+1,0).getDate();
+  var todayD=now.getDate();
+
+  // Build day→leave map for current month
+  var dayLeave={};
+  leaves.forEach(function(l){
+    var from=new Date(l.dateFrom+'T12:00:00');
+    var to=new Date((l.dateTo||l.dateFrom)+'T12:00:00');
+    var d=new Date(from);
+    while(d<=to){
+      if(d.getFullYear()===yr&&d.getMonth()===mo){
+        var dd=d.getDate();
+        if(!dayLeave[dd]) dayLeave[dd]=[];
+        dayLeave[dd].push(l);
+      }
+      d.setDate(d.getDate()+1);
+    }
+  });
+
+  // Calendar header
+  var monthNames=['January','February','March','April','May','June','July','August','September','October','November','December'];
+  var html='<div style="margin-bottom:12px">'
+    +'<div style="font-size:14px;font-weight:800;color:#1e3a8a;text-align:center;margin-bottom:8px">'+monthNames[mo]+' '+yr+'</div>'
+    +'<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center">'
+      +['S','M','T','W','T','F','S'].map(function(d){
+        return '<div style="font-size:10px;font-weight:800;color:#94a3b8;padding:4px 0">'+d+'</div>';
+      }).join('');
+
+  // Empty cells before first day
+  for(var e=0;e<firstDay;e++) html+='<div></div>';
+
+  // Day cells
+  for(var d=1;d<=daysInMonth;d++){
+    var isToday=(d===todayD);
+    var hasLeave=dayLeave[d]&&dayLeave[d].length>0;
+    var lt=hasLeave?getLeaveTypeInfo(dayLeave[d][0].type):null;
+    var bg=isToday?'#1e3a8a':(hasLeave?lt.bg:'transparent');
+    var fc=isToday?'#fff':(hasLeave?lt.color:'#374151');
+    var border=isToday?'none':(hasLeave?'1.5px solid '+lt.color:'1px solid #f1f5f9');
+    html+='<div onclick="showDayLeaves('+d+',\''+monthKey+'\')" '
+      +'style="padding:4px 2px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;'
+        +'background:'+bg+';color:'+fc+';border:'+border+';min-height:28px;display:flex;flex-direction:column;align-items:center;justify-content:center">'
+      +d+(hasLeave?'<div style="font-size:8px;line-height:1">'+lt.icon+'</div>':'')
+    +'</div>';
+  }
+  html+='</div></div>';
+
+  // Upcoming/recent leave list
+  var upcoming=leaves.filter(function(l){return String(l.dateTo||l.dateFrom)>=dateKeyUTC8().slice(0,7);}).slice(0,5);
+  if(upcoming.length){
+    html+='<div style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px">'
+      +'<div style="font-size:11px;font-weight:800;color:#64748b;margin-bottom:6px">'+(EN?'UPCOMING / RECENT':'AKAN DATANG / TERKINI')+'</div>';
+    upcoming.forEach(function(l){
+      var li=getLeaveTypeInfo(l.type);
+      var _canDelete=['admin','manager'].includes(currentUser.role)||l.username===currentUser.username;
+      html+='<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:.5px solid var(--border)">'
+        +'<span style="font-size:18px">'+li.icon+'</span>'
+        +'<div style="flex:1">'
+          +'<div style="font-size:12px;font-weight:700;color:var(--text)">'
+            +(l.dateTo&&l.dateTo!==l.dateFrom?l.dateFrom+' → '+l.dateTo:l.dateFrom)
+          +'</div>'
+          +'<div style="font-size:11px;color:'+li.color+';font-weight:700">'+li.icon+' '+(EN?li.label:li.labelMs)
+            +(l.name&&l.name!==currentUser.name?' · '+l.name:'')
+          +'</div>'
+          +(l.remark?'<div style="font-size:10px;color:#94a3b8">'+l.remark+'</div>':'')
+        +'</div>'
+        +(_canDelete?'<button onclick="confirmDeleteLeave(\''+l.id+'\')" '
+          +'style="background:#fee2e2;color:#dc2626;border:none;border-radius:6px;padding:4px 8px;font-size:10px;cursor:pointer">🗑</button>':'')
+      +'</div>';
+    });
+    html+='</div>';
+  } else {
+    html+='<div style="text-align:center;color:#94a3b8;font-size:13px;padding:8px 0">'+(EN?'No upcoming leave':'Tiada cuti akan datang')+'</div>';
+  }
+  return html;
+}
+
+function showDayLeaves(day, monthKey){
+  var yr=parseInt(monthKey.slice(0,4)), mo=parseInt(monthKey.slice(5,7))-1;
+  var dk=monthKey+'-'+(day<10?'0':'')+day;
+  var allLeaves=loadData('staff_leaves',[]);
+  var dayLeaves=allLeaves.filter(function(l){
+    return dk>=String(l.dateFrom).slice(0,10)&&dk<=(String(l.dateTo||l.dateFrom).slice(0,10));
+  });
+  if(!dayLeaves.length){
+    // No leave on this day — offer to add one
+    if(confirm((lang==='en'?'Add leave for ':'Tambah cuti untuk ')+dk+'?')) openAddLeaveModal(dk);
+    return;
+  }
+  var EN=lang==='en';
+  var msg=dayLeaves.map(function(l){
+    var li=getLeaveTypeInfo(l.type);
+    return li.icon+' '+(EN?li.label:li.labelMs)+' — '+(l.name||l.username)+(l.remark?' ('+l.remark+')':'');
+  }).join('\n');
+  alert((EN?'Leave on ':'Cuti pada ')+dk+':\n\n'+msg);
+}
+
+function openAddLeaveModal(prefillDate){
+  var EN=lang==='en';
+  var ov=document.createElement('div');ov.className='modal-overlay open';ov.id='add-leave-modal';
+  var today=dateKeyUTC8();
+  var typeOpts=LEAVE_TYPES.map(function(t){
+    return '<option value="'+t.key+'">'+t.icon+' '+(EN?t.label:t.labelMs)+'</option>';
+  }).join('');
+
+  // If exec, show staff selector
+  var isExec=['admin','manager'].includes(currentUser.role);
+  var storeUsers=isExec?Object.entries(cachedUsers||{}).filter(function(e){
+    return e[1].store===currentUser.store&&['staff','supervisor'].includes(e[1].role)&&e[1].status==='active';
+  }):[];
+  var staffSelector=isExec?('<div class="input-wrap"><label class="field-label">'+(EN?'Staff Member':'Kakitangan')+'</label>'
+    +'<select id="leave-staff" style="width:100%;padding:11px 14px;border-radius:12px;border:1.5px solid var(--border);font-size:14px;font-weight:600">'
+    +'<option value="'+currentUser.username+'">'+currentUser.name+' ('+(EN?'myself':'saya')+')</option>'
+    +storeUsers.map(function(e){return '<option value="'+e[0]+'">'+e[1].name+'</option>';}).join('')
+    +'</select></div>'):'';
+
+  ov.innerHTML='<div class="modal-box">'
+    +'<div class="modal-title">📆 '+(EN?'Add Leave / Off Day':'Tambah Cuti / Hari Rehat')+'</div>'
+    +staffSelector
+    +'<div class="input-wrap"><label class="field-label">'+(EN?'Leave Type':'Jenis Cuti')+'</label>'
+      +'<select id="leave-type" style="width:100%;padding:11px 14px;border-radius:12px;border:1.5px solid var(--border);font-size:15px;font-weight:600">'+typeOpts+'</select>'
+    +'</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
+      +'<div class="input-wrap"><label class="field-label">'+(EN?'From Date':'Dari Tarikh')+'</label>'
+        +'<input type="date" id="leave-from" value="'+(prefillDate||today)+'" style="width:100%;padding:11px 10px;border-radius:12px;border:1.5px solid var(--border);font-size:14px;font-weight:600"></div>'
+      +'<div class="input-wrap"><label class="field-label">'+(EN?'To Date':'Hingga Tarikh')+'</label>'
+        +'<input type="date" id="leave-to" value="'+(prefillDate||today)+'" style="width:100%;padding:11px 10px;border-radius:12px;border:1.5px solid var(--border);font-size:14px;font-weight:600"></div>'
+    +'</div>'
+    +'<div class="input-wrap"><label class="field-label">'+(EN?'Remark (optional)':'Catatan (pilihan)')+'</label>'
+      +'<input type="text" id="leave-remark" placeholder="'+(EN?'e.g. MC, annual, appointment':'cth. MC, cuti tahunan')+'" style="width:100%;padding:11px 14px;border-radius:12px;border:1.5px solid var(--border);font-size:14px">'
+    +'</div>'
+    +'<div style="display:flex;gap:10px;margin-top:8px">'
+      +'<button class="btn secondary" style="flex:1" onclick="var _m=document.getElementById(\'add-leave-modal\');if(_m)_m.remove()">'+(EN?'Cancel':'Batal')+'</button>'
+      +'<button class="btn success" style="flex:2" onclick="saveLeaveFromModal()">'+(EN?'💾 Save Leave':'💾 Simpan Cuti')+'</button>'
+    +'</div>'
+  +'</div>';
+  document.body.appendChild(ov);
+}
+
+function saveLeaveFromModal(){
+  var EN=lang==='en';
+  var type=document.getElementById('leave-type').value;
+  var from=document.getElementById('leave-from').value;
+  var to=document.getElementById('leave-to').value||from;
+  var remark=document.getElementById('leave-remark').value.trim();
+  var staffEl=document.getElementById('leave-staff');
+  var username=staffEl?staffEl.value:currentUser.username;
+  var name=(cachedUsers&&cachedUsers[username]&&cachedUsers[username].name)||currentUser.name;
+
+  if(!from){showToast(EN?'Select a date':'Pilih tarikh','error');return;}
+  if(to<from){showToast(EN?'End date must be after start':'Tarikh akhir mesti selepas mula','error');return;}
+
+  var rec={
+    id:'leave_'+Date.now()+'_'+username,
+    username:username,
+    name:name,
+    store:currentUser.store,
+    type:type,
+    dateFrom:from,
+    dateTo:to,
+    remark:remark,
+    createdBy:currentUser.username,
+    createdAt:nowUTC8()
+  };
+
+  saveLeaveRecord(rec);
+
+  // Sync to Central DB spreadsheet (not company GAS)
+  var centralUrl=CENTRAL_GAS_URL&&!CENTRAL_GAS_URL.includes('PASTE_')?CENTRAL_GAS_URL:'';
+  if(centralUrl){
+    fetch(centralUrl,{method:'POST',mode:'no-cors',cache:'no-cache',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(Object.assign({action:'saveLeave'},rec))}).catch(function(){});
+  }
+
+  var m=document.getElementById('add-leave-modal');if(m)m.remove();
+  showToast((EN?'Leave saved: ':'Cuti disimpan: ')+from+(to!==from?' → '+to:''),'success');
+  // Refresh calendar
+  var ci=document.getElementById('leave-calendar-inner');
+  if(ci) ci.innerHTML=renderLeaveCalendar();
+}
+
+function confirmDeleteLeave(id){
+  var EN=lang==='en';
+  if(!confirm(EN?'Delete this leave record?':'Padam rekod cuti ini?')) return;
+  deleteLeaveRecord(id);
+
+  // Sync deletion to Central DB spreadsheet
+  var centralUrl=CENTRAL_GAS_URL&&!CENTRAL_GAS_URL.includes('PASTE_')?CENTRAL_GAS_URL:'';
+  if(centralUrl){
+    fetch(centralUrl,{method:'POST',mode:'no-cors',cache:'no-cache',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:'deleteLeave',id:id,deletedBy:currentUser.username})}).catch(function(){});
+  }
+  var ci=document.getElementById('leave-calendar-inner');
+  if(ci) ci.innerHTML=renderLeaveCalendar();
+  showToast(EN?'Leave deleted':'Cuti dipadam','success');
 }
 
 function confirmAttendance(type){
