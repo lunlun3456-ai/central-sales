@@ -735,7 +735,7 @@ function fmtDateTimeUTC8(s){
 // ═══════════════════════════════════════════════════════════════
 // CENTRAL GAS — paste your Central DB GAS URL here after deploy
 // ═══════════════════════════════════════════════════════════════
-const CENTRAL_GAS_URL = 'https://script.google.com/macros/s/AKfycbz0KTtf706OtPU6iMqfOtrIwzO8ANsaXU45waYjsOia84a-m5bLSp283zfF2T00NAYI/exec';
+const CENTRAL_GAS_URL = 'https://script.google.com/macros/s/AKfycbxVzsVQHnYArSNpeGX_1ZtTYPm9N5UbaPy7rVZ_zGLjjxs3G9LM1tQKIqilUftZLnKC/exec';
 
 // Company → Stores mapping — matches Central DB Companies sheet exactly
 const COMPANY_STORES = {
@@ -819,6 +819,7 @@ function getDeviceName(){
 }
 function recordLoginDevice(){
   if(!currentUser) return;
+  if(!WEB_APP_URL||WEB_APP_URL.length<10) return; // no company GAS set yet
   fetch(WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',headers:{'Content-Type':'application/json'},body:JSON.stringify({
     action:'recordLogin',
     username:currentUser.username,
@@ -2367,11 +2368,15 @@ async function _proceedToCompanyLogin(){
 
 // ── Enter the app using Central DB user profile ───────────────
 function _enterApp(cr, pin){
+  // Normalize store — 'all' or empty means HQ (no zone restriction)
+  var store = cr.store || '';
+  if(!store || store === 'all' || store === 'ALL') store = 'HQ';
+
   var userObj = {
     username:    cr.username,
     name:        cr.name,
     role:        cr.role    || 'staff',
-    store:       cr.store   || 'HQ',
+    store:       store,
     phone:       cr.phone   || '',
     pin:         pin,
     status:      'active',
@@ -2383,8 +2388,11 @@ function _enterApp(cr, pin){
 // ── Enter app with validated user object ──────────────────────
 async function _doAppLogin(userMatch){
   var loginBtn=document.getElementById('login-btn');
+  // Zone check ONLY for staff/supervisor at non-HQ stores
+  // Admin, manager, boss are NEVER zone-restricted
   const _roleRestricted=['staff','supervisor'].includes(String(userMatch.role||'').toLowerCase());
-  if(_roleRestricted && userMatch.store && userMatch.store!=='HQ'){
+  const _storeRestricted = userMatch.store && userMatch.store!=='HQ' && userMatch.store!=='all';
+  if(_roleRestricted && _storeRestricted){
     if(!cachedWorkZones.length){
       var _wz=loadData('work_zones',[]);
       if(_wz.length) cachedWorkZones=_wz;
