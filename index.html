@@ -2275,205 +2275,118 @@ function showPendingPopup(username){
 }
 
 async function doLogin(){
-  var username=document.getElementById('login-name').value.trim().toLowerCase();
-  var pin=document.getElementById('login-pin').value.trim();
-  if(!username){showToast('Enter username','error');return;}
-  if(!pin||pin.length!==6){showToast('PIN must be 6 digits','error');return;}
-
-  var loginBtn=document.getElementById('login-btn');
-  if(loginBtn){loginBtn.disabled=true;loginBtn.textContent='Verifying...';}
-  showToast('Connecting to Central DB...','pending');
-
+  var username='',pin='',loginBtn=null;
   try{
-    // Call Central GAS for authentication
-    var url=CENTRAL_GAS_URL+'?action=login'
-      +'&username='+encodeURIComponent(username)
-      +'&pin='+encodeURIComponent(pin)
-      +'&t='+Date.now();
-    var resp=await fetch(url,{method:'GET',cache:'no-cache'});
+    username=document.getElementById('login-name').value.trim().toLowerCase();
+    pin=document.getElementById('login-pin').value.trim();
+    if(!username){showToast('Enter username','error');return;}
+    if(!pin||pin.length!==6){showToast('PIN must be 6 digits','error');return;}
+    loginBtn=document.getElementById('login-btn');
+    if(loginBtn){loginBtn.disabled=true;loginBtn.textContent='Verifying...';}
+    showToast('Connecting...','pending');
+    var url=CENTRAL_GAS_URL+'?action=login&username='+encodeURIComponent(username)+'&pin='+encodeURIComponent(pin)+'&t='+Date.now();
+    var resp=await fetch(url,{method:'GET',cache:'no-cache',mode:'cors'});
+    if(!resp.ok){showToast('Server error: '+resp.status,'error');if(loginBtn){loginBtn.disabled=false;loginBtn.textContent='Login';}return;}
     var cr=await resp.json();
-
-    if(loginBtn){loginBtn.disabled=false;loginBtn.textContent='Login 登录';}
-
-    if(!cr.success){
-      if(cr.notFound) showRegisterPopup(username);
-      else if(cr.pending) showToast('Account pending Admin approval.','error');
-      else showToast(cr.message||'Login failed','error');
+    if(loginBtn){loginBtn.disabled=false;loginBtn.textContent='Login';}
+    if(!cr||!cr.success){
+      if(cr&&cr.notFound) showRegisterPopup(username);
+      else if(cr&&cr.pending) showToast('Account pending approval.','error');
+      else showToast((cr&&cr.message)||'Login failed','error');
       return;
     }
-
-    // ✅ Central auth passed
     _centralUser=cr;
     var companies=cr.allowedCompanies||[];
     var companyMap=cr.companies||{};
-
-    if(companies.length===0){
-      showToast('No companies assigned. Contact Admin.','error'); return;
-    }
-
+    if(companies.length===0){showToast('No companies assigned. Contact Admin.','error');return;}
     if(companies.length===1){
-      // Single company — auto select and enter app
-      var name0=companies[0];
-      var gasUrl0=companyMap[name0]||'';
-      _activeCompany=name0;
-      WEB_APP_URL=gasUrl0&&!gasUrl0.includes('PASTE_')?gasUrl0:'';
-      localStorage.setItem('active_company',name0);
-      _enterApp(cr,pin);
-      return;
+      _activeCompany=companies[0];
+      WEB_APP_URL=String(companyMap[companies[0]]||'').indexOf('PASTE_')>=0?'':String(companyMap[companies[0]]||'');
+      localStorage.setItem('active_company',_activeCompany);
+      _enterApp(cr,pin);return;
     }
-
-    // Multiple companies — show selector
-    // Pre-select last used company
-    var lastUsed=localStorage.getItem('active_company');
-    var autoSelect=companies.indexOf(lastUsed)>=0?lastUsed:companies[0];
-    var gasUrlAuto=companyMap[autoSelect]||'';
-    _activeCompany=autoSelect;
-    WEB_APP_URL=gasUrlAuto&&!gasUrlAuto.includes('PASTE_')?gasUrlAuto:'';
-    localStorage.setItem('active_company',autoSelect);
-
-    if(loginBtn){loginBtn.style.display='none';}
+    var lastUsed=localStorage.getItem('active_company')||'';
+    var pick=companies.indexOf(lastUsed)>=0?lastUsed:companies[0];
+    _activeCompany=pick;
+    WEB_APP_URL=String(companyMap[pick]||'').indexOf('PASTE_')>=0?'':String(companyMap[pick]||'');
+    localStorage.setItem('active_company',pick);
+    if(loginBtn) loginBtn.style.display='none';
     var selEl=document.getElementById('login-company-select');
     selEl.innerHTML='';
-    companies.forEach(function(name){
-      var opt=document.createElement('option');
-      opt.value=name;opt.textContent=name;
-      if(name===autoSelect) opt.selected=true;
-      selEl.appendChild(opt);
-    });
+    companies.forEach(function(n){var o=document.createElement('option');o.value=n;o.textContent=n;if(n===pick)o.selected=true;selEl.appendChild(o);});
     document.getElementById('company-select-wrap').style.display='block';
-    showToast('Select your company or tap Enter','pending');
-
+    showToast('Select your company then tap Enter','pending');
   }catch(err){
-    if(loginBtn){loginBtn.disabled=false;loginBtn.textContent='Login 登录';}
-    showToast('Error: '+err.message,'error');
+    if(loginBtn){loginBtn.disabled=false;loginBtn.textContent='Login';}
+    showToast('Login error: '+err.message,'error');
+    console.error('doLogin error:',err);
   }
 }
 
-// Called after company selected from selector
-async function _proceedToCompanyLogin(){
-  var sel=document.getElementById('login-company-select');
-  if(!sel||!sel.value){showToast('Select a company','error');return;}
-  var name=sel.value;
-  var companyMap=(_centralUser&&_centralUser.companies)||{};
-  _activeCompany=name;
-  var gasUrl=companyMap[name]||'';
-  WEB_APP_URL=gasUrl&&!gasUrl.includes('PASTE_')?gasUrl:'';
-  localStorage.setItem('active_company',name);
-  document.getElementById('company-select-wrap').style.display='none';
-  var lb=document.getElementById('login-btn');
-  if(lb){lb.style.display='block';}
-  var pin=document.getElementById('login-pin').value.trim();
-  _enterApp(_centralUser,pin);
+function _proceedToCompanyLogin(){
+  try{
+    var sel=document.getElementById('login-company-select');
+    if(!sel||!sel.value){showToast('Select a company','error');return;}
+    _activeCompany=sel.value;
+    var companyMap=(_centralUser&&_centralUser.companies)||{};
+    var gasUrl=String(companyMap[sel.value]||'');
+    WEB_APP_URL=gasUrl.indexOf('PASTE_')>=0?'':gasUrl;
+    localStorage.setItem('active_company',_activeCompany);
+    document.getElementById('company-select-wrap').style.display='none';
+    var lb=document.getElementById('login-btn');
+    if(lb){lb.style.display='block';}
+    var pin=document.getElementById('login-pin').value.trim();
+    _enterApp(_centralUser,pin);
+  }catch(err){showToast('Error: '+err.message,'error');}
 }
 
-// ── Enter the app using Central DB user profile ───────────────
-function _enterApp(cr, pin){
-  // Normalize store — 'all' or empty means HQ (no zone restriction)
-  var store = cr.store || '';
-  if(!store || store === 'all' || store === 'ALL') store = 'HQ';
-
-  var userObj = {
-    username:    cr.username,
-    name:        cr.name,
-    role:        cr.role    || 'staff',
-    store:       store,
-    phone:       cr.phone   || '',
-    pin:         pin,
-    status:      'active',
-    homeCompany: cr.homeCompany || ''
-  };
-  _doAppLogin(userObj);
+function _enterApp(cr,pin){
+  try{
+    var store=String(cr.store||'').trim();
+    if(!store||store.toLowerCase()==='all') store='HQ';
+    _doAppLogin({
+      username:String(cr.username||''),
+      name:String(cr.name||cr.username||''),
+      role:String(cr.role||'staff'),
+      store:store,
+      phone:String(cr.phone||''),
+      pin:pin,
+      status:'active',
+      homeCompany:String(cr.homeCompany||'')
+    });
+  }catch(err){showToast('Enter app error: '+err.message,'error');console.error('_enterApp:',err);}
 }
 
-// ── Enter app with validated user object ──────────────────────
 async function _doAppLogin(userMatch){
-  var loginBtn=document.getElementById('login-btn');
-  // Zone check ONLY for staff/supervisor at non-HQ stores
-  // Admin, manager, boss are NEVER zone-restricted
-  const _roleRestricted=['staff','supervisor'].includes(String(userMatch.role||'').toLowerCase());
-  const _storeRestricted = userMatch.store && userMatch.store!=='HQ' && userMatch.store!=='all';
-  if(_roleRestricted && _storeRestricted){
-    if(!cachedWorkZones.length){
-      var _wz=loadData('work_zones',[]);
-      if(_wz.length) cachedWorkZones=_wz;
-    }
-    const _storeZones=(cachedWorkZones).filter(function(z){
-      return z.store===userMatch.store && String(z.status||'active')==='active';
+  try{
+    currentUser=Object.assign({},userMatch);
+    document.getElementById('login-screen').classList.remove('active');
+    document.getElementById('app-screen').classList.add('active');
+    try{updateTopBar();}catch(e){console.warn('updateTopBar:',e);}
+    try{updateNavLabels();}catch(e){console.warn('updateNavLabels:',e);}
+    try{applyPermissionsToNav();}catch(e){console.warn('applyPermissionsToNav:',e);}
+    var isBoss=currentUser.role==='boss';
+    var startTab=isBoss?'summary':'submit';
+    currentTab=startTab;
+    document.querySelectorAll('.nav-item').forEach(function(b){b.classList.remove('active');});
+    var navEl=document.getElementById('nav-'+startTab);
+    if(navEl) navEl.classList.add('active');
+    ['submit','records','summary','attendance','log','admin','profile'].forEach(function(tt){
+      var el=document.getElementById('tab-'+tt);
+      if(el) el.style.display=(tt===startTab?'block':'none');
     });
-    if(_storeZones.length>0){
-      // Zone defined — must be inside it to log in
-      showToast(lang==='zh'?'正在验证位置...':'Checking your location...','pending');
-      if(loginBtn){loginBtn.disabled=true;loginBtn.textContent=lang==='zh'?'定位中...':'Locating...';}
-      try{
-        var _loc=await getBestLocation();
-        var _nearest=_storeZones.map(function(z){
-          return {radiusMeters:parseFloat(z.radiusMeters)||500,
-                  distanceMeters:distanceMeters(_loc.lat,_loc.lng,parseFloat(z.latitude),parseFloat(z.longitude))};
-        }).sort(function(a,b){return a.distanceMeters-b.distanceMeters;})[0];
-        var _gpsBuffer=Math.max(0,(_loc.accuracy||0)-20);
-        if(_nearest.distanceMeters > _nearest.radiusMeters + _gpsBuffer){
-          // Outside zone — block login
-          if(loginBtn){loginBtn.disabled=false;loginBtn.textContent='Login 登录';}
-          var _src=_loc.source==='gps'?'📡 GPS ±'+_loc.accuracy+'m'
-            :_loc.source==='network'?'📶 Network ±'+_loc.accuracy+'m'
-            :_loc.source==='ip'||_loc.source==='ip2'?'🌐 IP (~5km)':'⚠️ No GPS';
-          showToast(
-            (lang==='zh'
-              ?'🚫 登录被拒绝：您不在工作区域内（距离 '+_nearest.distanceMeters+'m，限制 '+_nearest.radiusMeters+'m）'
-              :'🚫 Login blocked: outside work zone ('+_nearest.distanceMeters+'m away, max '+_nearest.radiusMeters+'m) · '+_src),
-            'error');
-          return; // ← BLOCK LOGIN
-        }
-      }catch(_e){
-        // Location fetch failed — allow login but warn (avoids locking out users with GPS issues)
-        console.warn('Zone login check: location error',_e);
-      }
-      if(loginBtn){loginBtn.disabled=false;loginBtn.textContent='Login 登录';}
+    try{if(isBoss) renderSummaryTab(); else renderSubmitTab();}catch(e){console.warn('renderTab:',e);}
+    try{syncMalaysiaTime();}catch(e){}
+    try{startNotifScheduler();}catch(e){}
+    try{saveData('attendance_records',[]);_serverAtt=[];_serverAttLoaded=false;fetchServerAttendance();}catch(e){}
+    if(WEB_APP_URL&&WEB_APP_URL.length>20){
+      try{recordLoginDevice();}catch(e){}
+      setTimeout(function(){try{triggerSyncRefresh();}catch(e){}},1500);
     }
-    // No zones defined for this store → no restriction
+  }catch(err){
+    showToast('App error: '+err.message,'error');
+    console.error('_doAppLogin error:',err);
   }
-
-  // ✅ Login success
-  currentUser=Object.assign({},userMatch);
-  var _username=currentUser.username; // safe reference for callbacks below
-  // If admin reset this user's device binding, clear it locally
-  if(userMatch.deviceReset==='pending'){
-    var oldB=loadData('_device_bindings',{});
-    Object.keys(oldB).forEach(function(k){
-      if(String(oldB[k]).toLowerCase()===_username) delete oldB[k];
-    });
-    saveData('_device_bindings',oldB);
-    fetch(WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',
-      headers:{'Content-Type':'text/plain'},
-      body:JSON.stringify({action:'confirmDeviceReset',username:_username})}).catch(function(){});
-  }
-  recordLoginDevice();
-  document.getElementById('login-screen').classList.remove('active');
-  document.getElementById('app-screen').classList.add('active');
-  const isBoss  = currentUser.role === 'boss';
-  const isAdmin = ['admin','boss'].includes(currentUser.role);
-  const isExec  = ['admin','boss','manager'].includes(currentUser.role);
-  applyPermissionsToNav();
-  document.getElementById('nav-log').style.display = (isExec&&!isBoss) ? 'flex' : 'none';
-  updateTopBar(); updateNavLabels();
-  const _st = isBoss ? 'summary' : 'submit';
-  currentTab = _st;
-  document.querySelectorAll('.nav-item').forEach(b=>b.classList.remove('active'));
-  document.getElementById('nav-'+_st).classList.add('active');
-  ['submit','records','summary','attendance','log','admin','profile'].forEach(tt=>{
-    document.getElementById('tab-'+tt).style.display=tt===_st?'block':'none';
-  });
-  // Sync Malaysia internet time
-  syncMalaysiaTime();
-  // Start notification scheduler after login
-  startNotifScheduler();
-  // Clear phone's local attendance data — server is authoritative
-  saveData('attendance_records', []);
-  _serverAtt = []; _serverAttLoaded = false;
-  // Fetch attendance from server in background
-  fetchServerAttendance();
-  if(isBoss) renderSummaryTab(); else renderSubmitTab();
-  triggerSyncRefresh();
 }
 
 // ============================================================
