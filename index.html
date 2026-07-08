@@ -4283,8 +4283,7 @@ async function renderAdminTab() {
       </div>
     </div>`).join('');
 
-  // Resigned staff section
-  const resigned=users.filter(u=>String(u.status||'').toLowerCase()==='resigned');
+  // Resigned staff section — already populated in forEach above
   const resignedHtml=resigned.length>0?`
     <div style="margin-top:16px">
       <details>
