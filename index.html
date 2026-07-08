@@ -735,7 +735,7 @@ function fmtDateTimeUTC8(s){
 // ═══════════════════════════════════════════════════════════════
 // CENTRAL GAS — paste your Central DB GAS URL here after deploy
 // ═══════════════════════════════════════════════════════════════
-const CENTRAL_GAS_URL = 'https://script.google.com/macros/s/AKfycbxVzsVQHnYArSNpeGX_1ZtTYPm9N5UbaPy7rVZ_zGLjjxs3G9LM1tQKIqilUftZLnKC/exec';
+const CENTRAL_GAS_URL = 'https://script.google.com/macros/s/AKfycbyoCJEa3G-7uj2IIngkK_FuV4kCP6l_58-lcMuzfZjZS-sQY0XYScebMdO7f3eFmzmH/exec';
 
 // Company → Stores mapping — matches Central DB Companies sheet exactly
 const COMPANY_STORES = {
@@ -750,8 +750,11 @@ const COMPANY_STORES = {
   'PAMANUSA SDN BHD': ['PAMANUSA SDN BHD'],
 };
 const ALL_COMPANIES  = Object.keys(COMPANY_STORES);
-const STORES   = ['HQ'].concat(Object.values(COMPANY_STORES).flat());
-const BRANCHES = Object.values(COMPANY_STORES).flat();
+// Build flat store list without .flat() — not supported on older Android
+var _allStores = [];
+ALL_COMPANIES.forEach(function(c){ COMPANY_STORES[c].forEach(function(s){ _allStores.push(s); }); });
+const STORES   = ['HQ'].concat(_allStores);
+const BRANCHES = _allStores.slice();
 
 // Company GAS URL — set dynamically after central login
 // For fallback (before Central GAS configured): paste your existing GAS URL here
@@ -834,7 +837,7 @@ function recordLoginDevice(){
   })}).catch(e=>console.warn('Login device record failed:',e));
 }
 function showAttendanceResult(kind,title,message,details,attType){
-  document.getElementById('attendance-result-modal')?.remove();
+  var _r=document.getElementById('attendance-result-modal');if(_r)_r.remove();
   var ov=document.createElement('div');
   ov.className='modal-overlay open';
   ov.id='attendance-result-modal';
@@ -1857,7 +1860,7 @@ async function sendMonthlyReport(month){
   if(btn){btn.disabled=true;btn.textContent=lang==='en'?'Sending...':'Menghantar...';}
   saveReportSettings(s);
   try{
-    var reportMonth=month||document.getElementById('report-month')?.value||dateKeyUTC8().slice(0,7);
+    var reportMonth=month||(function(){var _e=document.getElementById('report-month');return _e?_e.value:'';})()||dateKeyUTC8().slice(0,7);
     await fetch(WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',
       headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'sendMonthlyReport',emails:s.emails,
@@ -2251,7 +2254,7 @@ function showRegisterPopup(username){
     +'<div style="font-size:15px;font-weight:800;color:#1e3a8a;margin-bottom:8px">'+('Kindly register before log in')+'</div>'
     +'<div style="font-size:12px;color:#64748b;margin-bottom:16px">'+('Your account does not exist. Please register first and wait for Admin approval.')+'</div>'
     +'<div style="display:flex;flex-direction:column;gap:10px">'
-      +'<button class="btn success" style="font-size:15px;padding:12px" onclick="document.getElementById(\'reg-popup\').remove();document.querySelector(\'[onclick*=showRegister\')?.click()||showRegisterModal()">'
+      +'<button class="btn success" style="font-size:15px;padding:12px" onclick="var _rp=document.getElementById(\'reg-popup\');if(_rp)_rp.remove();showRegisterModal()">'
         +('📝 Register Now')+'</button>'
       +'<button class="btn secondary" style="font-size:14px;padding:10px" onclick="document.getElementById(\'reg-popup\').remove()">'+(EN?'Back / Kembali':'Kembali')+'</button>'
     +'</div></div>';
@@ -2538,8 +2541,8 @@ function updateTotalFromMain(){
 }
 
 function checkAndLoadExistingSales() {
-  const dateVal  = document.getElementById('submit-date')?.value;
-  const storeVal = document.getElementById('submit-store')?.value;
+  const dateVal  = (function(){var _e=document.getElementById('submit-date');return _e?_e.value:'';})();
+  const storeVal = (function(){var _e=document.getElementById('submit-store');return _e?_e.value:'';})();
   if(!dateVal||!storeVal) return;
   const existing=getSales().find(s=>s.dateKey===dateVal&&s.store===storeVal);
   if(existing){
@@ -2573,8 +2576,8 @@ function updateLiveTotal() {
 }
 
 function openConfirm(withUpload) { withUpload=!!withUpload;
-  const store     =document.getElementById('submit-store')?.value||'';
-  const targetDate=document.getElementById('submit-date')?.value||'';
+  const store     =(function(){var _e=document.getElementById('submit-store');return _e?_e.value:'';})()||'';
+  const targetDate=(function(){var _e=document.getElementById('submit-date');return _e?_e.value:'';})()||'';
   if(!store||!targetDate){showToast(lang==='zh'?'请选择门店和日期':'Select store and date','error');return;}
 
   const isRestricted=['staff','supervisor'].includes(currentUser.role);
@@ -2588,8 +2591,8 @@ function openConfirm(withUpload) { withUpload=!!withUpload;
     showToast(lang==='en'?'Settlement already uploaded. Manager/Admin approval required.':'Penyelesaian sudah dimuat naik. Perlu kelulusan.','error'); return;
   }
 
-  const total = Math.round((parseFloat(document.getElementById('s-total-main')?.value)||0)*100)/100;
-  const remark=document.getElementById('s-remark')?.value||'';
+  const total = Math.round((parseFloat((function(){var _e=document.getElementById('s-total-main');return _e?_e.value:'';})())||0)*100)/100;
+  const remark=(function(){var _e=document.getElementById('s-remark');return _e?_e.value:'';})()||'';
   const existingRecord=getSales().find(item=>item.dateKey===targetDate&&item.store===store);
   const isEdit=!!existingRecord;
 
@@ -4633,10 +4636,10 @@ function confirmAndLockAfterUpload(store, dateKey) {
 }
 
 function requestSettlementApproval(){
-  var store=document.getElementById('submit-store')?.value||currentUser.store||'';
-  var dateVal=document.getElementById('submit-date')?.value||dateKeyUTC8();
-  var total=parseFloat(document.getElementById('s-total-main')?.value)||0;
-  var remark=document.getElementById('s-remark')?.value||'';
+  var store=(function(){var _e=document.getElementById('submit-store');return _e?_e.value:'';})()||currentUser.store||'';
+  var dateVal=(function(){var _e=document.getElementById('submit-date');return _e?_e.value:'';})()||dateKeyUTC8();
+  var total=parseFloat((function(){var _e=document.getElementById('s-total-main');return _e?_e.value:'';})())||0;
+  var remark=(function(){var _e=document.getElementById('s-remark');return _e?_e.value:'';})()||'';
   if(!total){showToast('Enter totalSalesLabel first','error');return;}
   var EN=lang==='en';
   var ov=document.createElement('div');ov.className='modal-overlay open';ov.id='settle-appr-modal';
@@ -5082,7 +5085,7 @@ function openCashDrawerModal() {
 }
 
 function renderCashDrawerModal() {
-  document.getElementById('cd-main-modal')?.remove();
+  var _r=document.getElementById('cd-main-modal');if(_r)_r.remove();
   const isExec = ['boss','admin','manager'].includes(currentUser.role);
   const movements = getCashMovements().filter(r=>r.dateKey===_cdDate&&r.store===_cdStore&&isCashMovementApproved(r));
   const pendingOuts = getApprovals().filter(r=>r.type==='cash_out'&&r.status==='pending'&&r.dateKey===_cdDate&&r.store===_cdStore);
@@ -5267,7 +5270,7 @@ function cdRefreshDenom(val) {
 
 // ── Cash In / Out movement ────────────────────────────────────
 function openAddMovement(type) {
-  document.getElementById('cd-add-mv-modal')?.remove();
+  var _r=document.getElementById('cd-add-mv-modal');if(_r)_r.remove();
   const isOut = type==='out';
   const ov = document.createElement('div');
   ov.className='modal-overlay open'; ov.id='cd-add-mv-modal';
@@ -5306,8 +5309,8 @@ function openAddMovement(type) {
 }
 
 function saveCashMovementEntry(type) {
-  const amount = parseFloat(document.getElementById('mv-amount')?.value)||0;
-  const reason = document.getElementById('mv-reason')?.value||'';
+  const amount = parseFloat((function(){var _e=document.getElementById('mv-amount');return _e?_e.value:'';})())||0;
+  const reason = (function(){var _e=document.getElementById('mv-reason');return _e?_e.value:'';})()||'';
   if(amount<=0) { showToast('Enter an amount','error'); return; }
 
   const restrictedOut = type==='out' && !isExecutiveRole(currentUser.role);
@@ -5337,7 +5340,7 @@ function saveCashMovementEntry(type) {
     body: JSON.stringify({action:'submitCashMovement',...record})
   }).catch(e=>console.warn('Movement sync failed:',e));
 
-  document.getElementById('cd-add-mv-modal')?.remove();
+  var _r=document.getElementById('cd-add-mv-modal');if(_r)_r.remove();
   showToast(restrictedOut ? 'Cash out sent for approval.' : 'Saved','success');
   renderCashDrawerModal();
 }
@@ -5352,7 +5355,7 @@ function deleteCashMovement(id) {
 // ── Submit full cash drawer count ─────────────────────────────
 function submitCashDrawerFull() {
   const total = cdCalcTotal();
-  const note  = document.getElementById('cd-final-note')?.value||'';
+  const note  = (function(){var _e=document.getElementById('cd-final-note');return _e?_e.value:'';})()||'';
   const breakdown = {};
   ALL_DENOMS.forEach(d=>{ if(_cdQty[d.val]>0) breakdown[d.val]=_cdQty[d.val]; });
 
@@ -5374,7 +5377,7 @@ function submitCashDrawerFull() {
     cd.push(record);
     saveCashDrawer(cd);
     showToast(lang==='zh'?'现金盘点已保存 ✓':'Cash count saved ✓','success');
-    document.getElementById('cd-main-modal')?.remove();
+    var _r=document.getElementById('cd-main-modal');if(_r)_r.remove();
     renderSubmitTab();
     if(currentTab==='records') renderRecordsTab();
   }).catch(e=>showToast('Error: '+e,'error'));
