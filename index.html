@@ -1279,6 +1279,7 @@ const PERM_FEATURES = [
   // ── Records & Summary ──────────────────────────────────────────
   { key:'view_records',      grp:'Records', label:'View Records Tab',               bm:'Lihat Tab Rekod' },
   { key:'view_summary',      grp:'Summary', label:'View Summary Tab',               bm:'Lihat Tab Ringkasan' },
+  { key:'view_all_companies',grp:'Summary', label:'All-Company Sales Dashboard',    bm:'Papan Jualan Semua Syarikat' },
   // ── Admin panel sub-features ───────────────────────────────────
   { key:'view_admin',        grp:'Admin',   label:'Admin Panel (access)',            bm:'Panel Admin (akses)' },
   { key:'mgr_dashboard',     grp:'Admin',   label:'Mgr Dashboard',                  bm:'Papan Pemuka Pengurus' },
@@ -1297,11 +1298,11 @@ const PERM_FEATURES = [
 ];
 
 const DEFAULT_PERMS = {
-  staff:      { submit_sales:1, confirm_daily:0, settlement_report:1, view_records:1, view_summary:0, view_admin:0, mgr_dashboard:0, pending_approvals:0, attendance:1, work_zone:0, work_schedule:0, db_backup:0, role_perm:0, user_mgmt:0, monthly_report:0, cash_drawer:0, approve_sales:0, notifications:1 },
-  supervisor: { submit_sales:1, confirm_daily:1, settlement_report:1, view_records:1, view_summary:0, view_admin:1, mgr_dashboard:1, pending_approvals:1, attendance:1, work_zone:0, work_schedule:1, db_backup:0, role_perm:0, user_mgmt:0, monthly_report:0, cash_drawer:1, approve_sales:1, notifications:1 },
-  manager:    { submit_sales:1, confirm_daily:1, settlement_report:1, view_records:1, view_summary:1, view_admin:1, mgr_dashboard:1, pending_approvals:1, attendance:1, work_zone:1, work_schedule:1, db_backup:0, role_perm:0, user_mgmt:1, monthly_report:1, cash_drawer:1, approve_sales:1, notifications:1 },
-  admin:      { submit_sales:1, confirm_daily:1, settlement_report:1, view_records:1, view_summary:1, view_admin:1, mgr_dashboard:1, pending_approvals:1, attendance:1, work_zone:1, work_schedule:1, db_backup:1, role_perm:1, user_mgmt:1, monthly_report:1, cash_drawer:1, approve_sales:1, notifications:1 },
-  boss:       { submit_sales:0, confirm_daily:0, settlement_report:1, view_records:1, view_summary:1, view_admin:1, mgr_dashboard:1, pending_approvals:0, attendance:0, work_zone:0, work_schedule:0, db_backup:0, role_perm:0, user_mgmt:0, monthly_report:1, cash_drawer:0, approve_sales:0, notifications:1 },
+  staff:      { submit_sales:1, confirm_daily:0, settlement_report:1, view_records:1, view_summary:0, view_admin:0, mgr_dashboard:0, pending_approvals:0, attendance:1, work_zone:0, work_schedule:0, db_backup:0, role_perm:0, user_mgmt:0, monthly_report:0, cash_drawer:0, approve_sales:0, notifications:1, view_all_companies:0 },
+  supervisor: { submit_sales:1, confirm_daily:1, settlement_report:1, view_records:1, view_summary:0, view_admin:1, mgr_dashboard:1, pending_approvals:1, attendance:1, work_zone:0, work_schedule:1, db_backup:0, role_perm:0, user_mgmt:0, monthly_report:0, cash_drawer:1, approve_sales:1, notifications:1, view_all_companies:0 },
+  manager:    { submit_sales:1, confirm_daily:1, settlement_report:1, view_records:1, view_summary:1, view_admin:1, mgr_dashboard:1, pending_approvals:1, attendance:1, work_zone:1, work_schedule:1, db_backup:0, role_perm:0, user_mgmt:1, monthly_report:1, cash_drawer:1, approve_sales:1, notifications:1, view_all_companies:0 },
+  admin:      { submit_sales:1, confirm_daily:1, settlement_report:1, view_records:1, view_summary:1, view_admin:1, mgr_dashboard:1, pending_approvals:1, attendance:1, work_zone:1, work_schedule:1, db_backup:1, role_perm:1, user_mgmt:1, monthly_report:1, cash_drawer:1, approve_sales:1, notifications:1, view_all_companies:1 },
+  boss:       { submit_sales:0, confirm_daily:0, settlement_report:1, view_records:1, view_summary:1, view_admin:1, mgr_dashboard:1, pending_approvals:0, attendance:0, work_zone:0, work_schedule:0, db_backup:0, role_perm:0, user_mgmt:0, monthly_report:1, cash_drawer:0, approve_sales:0, notifications:1, view_all_companies:1 },
 };
 
 function getPerms(){
@@ -1872,6 +1873,114 @@ async function sendMonthlyReport(month){
   }
   if(btn){btn.disabled=false;btn.textContent='📧 Send Monthly Report';}
 }
+
+// ── All-Company Sales Dashboard ───────────────────────────────
+var _allCoSales    = {};   // { companyName: [salesRows] }
+var _allCoLoading  = {};   // { companyName: 'loading'|'done'|'error' }
+var _allCoDate     = '';   // selected date filter
+
+function renderAllCompanyPanel(){
+  var el=document.getElementById('all-company-panel');
+  if(!el) return;
+  var EN=lang==='en';
+  if(!_centralUser||!_centralUser.companies||Object.keys(_centralUser.companies).length===0){
+    el.innerHTML='<div class="card"><div class="card-title">🏢 '+(EN?'All-Company Sales':'Jualan Semua Syarikat')+'</div>'
+      +'<div class="empty-state"><p>'+(EN?'No companies configured in Central DB.':'Tiada syarikat dikonfigurasi.')+'</p></div></div>';
+    return;
+  }
+  if(!_allCoDate) _allCoDate=dateKeyUTC8();
+  var companies=Object.keys(_centralUser.companies);
+  var grandTotal=0;
+  companies.forEach(function(co){
+    var rows=_allCoSales[co]||[];
+    rows.filter(function(r){return String(r.dateKey).slice(0,10)===_allCoDate;})
+      .forEach(function(r){grandTotal+=parseFloat(r.total||0);});
+  });
+  var html='<div class="card">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">'
+      +'<div class="card-title" style="margin:0">🏢 '+(EN?'All-Company Sales':'Jualan Semua Syarikat')+'</div>'
+      +'<button onclick="fetchAllCompanySales()" style="padding:6px 12px;border-radius:8px;border:1.5px solid #1e3a8a;background:#eff6ff;color:#1e3a8a;font-size:11px;font-weight:800;cursor:pointer">🔄 '+(EN?'Refresh':'Muat Semula')+'</button>'
+    +'</div>'
+    // Date picker
+    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">'
+      +'<label style="font-size:11px;font-weight:800;color:#64748b">📅 '+(EN?'Date:':'Tarikh:')+'</label>'
+      +'<input type="date" value="'+_allCoDate+'" onchange="window._allCoDate=this.value;renderAllCompanyPanel()" '
+        +'style="padding:6px 10px;border-radius:8px;border:1.5px solid var(--border);font-size:13px;font-weight:700">'
+      +'<button onclick="window._allCoDate=dateKeyUTC8();renderAllCompanyPanel()" '
+        +'style="padding:6px 10px;border-radius:8px;border:1.5px solid #1e3a8a;background:#eff6ff;color:#1e3a8a;font-size:11px;font-weight:700;cursor:pointer">'+(EN?'Today':'Hari Ini')+'</button>'
+    +'</div>'
+    // Grand total
+    +'<div style="background:linear-gradient(135deg,#1e3a8a,#3b82f6);border-radius:14px;padding:14px 16px;margin-bottom:12px;text-align:center">'
+      +'<div style="font-size:11px;font-weight:700;color:rgba(255,255,255,.7)">'+(EN?'TOTAL ALL COMPANIES':'JUMLAH SEMUA SYARIKAT')+' · '+_allCoDate+'</div>'
+      +'<div style="font-size:28px;font-weight:900;color:#fff">RM '+fmtRM(grandTotal)+'</div>'
+    +'</div>'
+    // Per-company rows
+    +'<div style="display:flex;flex-direction:column;gap:8px">';
+
+  companies.forEach(function(co){
+    var status=_allCoLoading[co]||'idle';
+    var rows=(_allCoSales[co]||[]).filter(function(r){return String(r.dateKey).slice(0,10)===_allCoDate;});
+    var coTotal=rows.reduce(function(a,r){return a+parseFloat(r.total||0);},0);
+    var stores={}; rows.forEach(function(r){stores[r.store]=(stores[r.store]||0)+parseFloat(r.total||0);});
+    var isCurrent=co===_activeCompany;
+    var statusBadge=status==='loading'?'<span style="font-size:10px;color:#f59e0b;font-weight:700">⏳</span>'
+      :status==='error'?'<span style="font-size:10px;color:#ef4444;font-weight:700">⚠️ Error</span>'
+      :status==='done'?'<span style="font-size:10px;color:#10b981;font-weight:700">✅</span>'
+      :'<span style="font-size:10px;color:#94a3b8;font-weight:700">—</span>';
+    html+='<div style="border:1.5px solid '+(isCurrent?'#1e3a8a':'var(--border)')+';border-radius:12px;padding:10px 12px;background:'+(isCurrent?'#eff6ff':'var(--surface)')+'">'
+      +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">'
+        +'<div style="font-size:13px;font-weight:800;color:'+(isCurrent?'#1e3a8a':'var(--text)')+'">'+co+statusBadge+(isCurrent?' <span style="font-size:9px;background:#1e3a8a;color:#fff;border-radius:10px;padding:1px 6px">ACTIVE</span>':'')+'</div>'
+        +'<div style="font-size:16px;font-weight:900;color:#1e3a8a">RM '+fmtRM(coTotal)+'</div>'
+      +'</div>'
+      +(Object.keys(stores).length>0
+        ?'<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px">'
+          +Object.entries(stores).map(function(e){
+            return '<span style="font-size:10px;background:#f8fafc;border:1px solid var(--border);border-radius:6px;padding:2px 6px;font-weight:600">'+e[0]+': RM '+fmtRM(e[1])+'</span>';
+          }).join('')+'</div>'
+        :'<div style="font-size:11px;color:#94a3b8">'+(status==='loading'?EN?'Loading...':'Memuatkan...':(status==='idle'?EN?'Tap Refresh to load':'Ketik Muat Semula':EN?'No sales this date':'Tiada jualan'))+'</div>')
+    +'</div>';
+  });
+  html+='</div></div>';
+  el.innerHTML=html;
+  // Bind global for date change
+  window._allCoDate=_allCoDate;
+}
+
+async function fetchAllCompanySales(){
+  if(!_centralUser||!_centralUser.companies) return;
+  var companies=Object.keys(_centralUser.companies);
+  var EN=lang==='en';
+  showToast(EN?'Fetching sales from all companies...':'Mendapatkan jualan semua syarikat...','pending');
+  // Fetch all companies in parallel
+  var promises=companies.map(async function(co){
+    var gasUrl=_centralUser.companies[co]||'';
+    if(!gasUrl||gasUrl.includes('PASTE_')){
+      _allCoLoading[co]='error';
+      renderAllCompanyPanel();
+      return;
+    }
+    _allCoLoading[co]='loading';
+    renderAllCompanyPanel();
+    try{
+      var url=gasUrl+'?action=getSales&t='+Date.now();
+      var resp=await fetch(url,{method:'GET',cache:'no-cache'});
+      var data=await resp.json();
+      var rows=Array.isArray(data)?data:(data&&Array.isArray(data.sales)?data.sales:[]);
+      _allCoSales[co]=rows;
+      _allCoLoading[co]='done';
+    }catch(e){
+      _allCoSales[co]=[];
+      _allCoLoading[co]='error';
+      console.warn('fetchAllCompanySales error for '+co+':',e.message);
+    }
+    renderAllCompanyPanel();
+  });
+  await Promise.all(promises);
+  showToast(EN?'All companies loaded':'Semua syarikat dimuatkan','success');
+}
+
+// Auto-fetch when panel first renders if no data yet
+var _allCoFetched=false;
 
 function renderMonthlyReportPanel(){
   var el=document.getElementById('monthly-report-panel');
@@ -4595,9 +4704,15 @@ async function renderAdminTab() {
       ${resignedHtml}
     `:''}
     ${hasPerm('role_perm')?'<div id="perms-panel" style="margin-top:8px"></div>':''}
+    ${hasPerm('view_all_companies')?'<div id="all-company-panel" style="margin-top:8px"></div>':''}
     ${hasPerm('monthly_report')?'<div id="monthly-report-panel"></div>':''}`;
   if(hasPerm('role_perm')) renderPermissionsPanel();
   if(hasPerm('monthly_report')) renderMonthlyReportPanel();
+  if(hasPerm('view_all_companies')){
+    renderAllCompanyPanel();
+    // Auto-fetch on first open
+    if(!_allCoFetched){ _allCoFetched=true; fetchAllCompanySales(); }
+  }
 }
 async function approveUser(username) {
   showToast(lang==='zh'?'正在审批...':'Approving...','pending');
