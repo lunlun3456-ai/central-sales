@@ -4717,7 +4717,7 @@ function renderProfileTab() {
   var switcher=allowedCos.length>1?`
     <div class="card" style="border:2px solid #dbeafe">
       <div class="card-title">🏢 ${lang==='en'?'Switch Company':'Tukar Syarikat'}</div>
-      <div style="font-size:12px;color:var(--text2);margin-bottom:10px">${lang==='en'?'Active:':'Aktif:'} <b>${_activeCompany}</b></div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:10px">${lang==='en'?'Active:':'Aktif:'} <b>${_activeCompany}</b> <span style="font-size:10px;color:#94a3b8">${lang==='en'?'(tap to switch)':'(ketik untuk tukar)'}</span></div>
       <div style="display:flex;flex-direction:column;gap:8px">
         ${allowedCos.map(name=>`<button onclick="switchCompanyAndLogout('${name.replace(/'/g,"\\'")}')"
           style="padding:12px 16px;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;text-align:left;
@@ -4805,13 +4805,48 @@ function doLogout() {
   var lb=document.getElementById('login-btn'); if(lb){lb.style.display='block';lb.disabled=false;lb.textContent='Login 登录';}
 }
 
-function switchCompanyAndLogout(name){
+async function switchCompanyAndLogout(name){
   if(!_centralUser||!(_centralUser.companies||{})[name]){showToast('Company not available','error');return;}
+  if(name===_activeCompany){showToast('Already on '+name,'pending');return;}
   var EN=lang==='en';
-  if(!confirm(EN?'Switch to '+name+'?\nYou will be logged out.':'Tukar ke '+name+'?\nAnda akan log keluar.')) return;
+  if(!confirm(EN?'Switch to '+name+'?':'Tukar ke '+name+'?')) return;
+
+  // Switch URL immediately — no logout needed
   setActiveCompany(name);
-  doLogout();
-  showToast((EN?'Switched to ':'Ditukar ke ')+name,'success');
+
+  // Update currentUser store to match this company
+  // Keep same role/username from Central DB — store resets to HQ until sync
+  currentUser=Object.assign({},currentUser,{
+    store: _centralUser.store&&_centralUser.store!=='all'?_centralUser.store:'HQ',
+    homeCompany: name
+  });
+
+  // Clear cached company data so we don't show stale data from old company
+  saveSales([]);
+  saveData('cached_users',{});
+  cachedUsers={};
+  saveSettlementsData([]);
+  saveSettlementLocks([]);
+  saveApprovals([]);
+  _serverAtt=[]; _serverAttLoaded=false;
+
+  // Update top bar
+  updateTopBar();
+
+  // Switch to submit tab and show loading state
+  switchTab('submit', document.getElementById('nav-submit'));
+  showToast((EN?'Switched to ':'Ditukar ke ')+name+(EN?' — syncing data...':' — menyegerak data...'),'pending');
+
+  // Sync fresh data from new company GAS
+  try{
+    await triggerSyncRefresh();
+    showToast((EN?'Now viewing: ':'Sedang melihat: ')+name,'success');
+  }catch(e){
+    showToast((EN?'Switched to ':'Ditukar ke ')+name+(EN?' (sync later)':' (segerak kemudian)'),'success');
+  }
+
+  // Re-render profile to update active company highlight
+  if(currentTab==='profile') renderProfileTab();
 }
 
 function showToast(msg,type='') {
