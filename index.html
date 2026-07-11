@@ -210,6 +210,36 @@
   .attendance-result-box.pending { background:#fffbeb;border-top:8px solid #f59e0b; }
   .attendance-result-box.success { background:#f0fdf4;border-top:8px solid #10b981; }
   @media (min-width: 500px) { body { max-width: 480px; margin: 0 auto; } }
+
+  /* ── DESKTOP MODE (admin only) ───────────────────────────── */
+  body.desktop-mode { max-width: 100% !important; margin: 0 !important; background: #f1f5f9; }
+  body.desktop-mode #app-screen { display: grid !important; grid-template-columns: 220px 1fr; grid-template-rows: 64px 1fr; height: 100vh; overflow: hidden; }
+  body.desktop-mode .top-bar { grid-column: 1 / 3; grid-row: 1; height: 64px; position: sticky; top: 0; z-index: 100; border-radius: 0; }
+  body.desktop-mode .bottom-nav { position: static; grid-column: 1; grid-row: 2; flex-direction: column; border-top: none; border-right: 1.5px solid var(--border); box-shadow: 2px 0 8px rgba(0,0,0,.06); height: calc(100vh - 64px); overflow-y: auto; padding: 12px 8px; background: #fff; align-items: stretch; }
+  body.desktop-mode .nav-item { flex-direction: row; justify-content: flex-start; gap: 10px; padding: 11px 14px; border-radius: 10px; font-size: 13px; text-align: left; flex: none; width: 100%; }
+  body.desktop-mode .nav-item .nav-icon { font-size: 20px; margin-bottom: 0; }
+  body.desktop-mode .nav-item.active { background: #eff6ff; color: var(--primary); }
+  body.desktop-mode #content-area { grid-column: 2; grid-row: 2; overflow-y: auto; padding: 20px 28px; height: calc(100vh - 64px); }
+  body.desktop-mode .content { display: none; }
+  body.desktop-mode .content.active-tab { display: block; }
+  body.desktop-mode .card { max-width: 100%; }
+  body.desktop-mode #toast { bottom: 24px; }
+  body.desktop-mode .modal-overlay { align-items: center; }
+  body.desktop-mode .modal-box { border-radius: 18px; max-width: 600px; max-height: 88vh; }
+  /* Desktop: permissions panel grid */
+  body.desktop-mode #perms-panel .perm-feat-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  /* Desktop: all-company panel wider */
+  body.desktop-mode #all-company-panel .card { padding: 24px; }
+  /* Desktop nav separator */
+  body.desktop-mode .nav-separator { height: 1px; background: var(--border); margin: 8px 4px; }
+  /* Desktop mode toggle button */
+  #desktop-toggle { display: none; }
+  body.desktop-mode #desktop-toggle { background: #1e3a8a; color: #fff; }
+  @media (max-width: 768px) {
+    body.desktop-mode { max-width: 100% !important; }
+    body.desktop-mode #app-screen { grid-template-columns: 1fr; }
+    body.desktop-mode .bottom-nav { display: none; }
+  }
   .att-grid        { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px; }
   .att-card        { border-radius:14px; padding:14px 12px; text-align:center; border:2.5px solid; }
   .att-card.ci-done     { background:#f0fdf4; border-color:#10b981; }
@@ -435,17 +465,20 @@
     </div>
     <div class="topbar-right">
       <button class="btn refresh-btn" onclick="triggerSyncRefresh()" id="sync-btn">🔄</button>
+      <button id="desktop-toggle" onclick="toggleDesktopMode()" title="Desktop / Mobile View" style="background:rgba(255,255,255,0.15);border:none;border-radius:50%;width:40px;height:40px;font-size:18px;cursor:pointer;display:none">🖥️</button>
       <button class="lang-btn" onclick="toggleLang()">中/EN</button>
     </div>
   </div>
 
-  <div class="content" id="tab-submit"  style="display:block"></div>
-  <div class="content" id="tab-records" style="display:none"></div>
-  <div class="content" id="tab-summary" style="display:none"></div>
+  <div id="content-area">
+  <div class="content" id="tab-submit"     style="display:block"></div>
+  <div class="content" id="tab-records"    style="display:none"></div>
+  <div class="content" id="tab-summary"    style="display:none"></div>
   <div class="content" id="tab-attendance" style="display:none"></div>
-  <div class="content" id="tab-log"     style="display:none"></div>
-  <div class="content" id="tab-admin"   style="display:none"></div>
-  <div class="content" id="tab-profile" style="display:none"></div>
+  <div class="content" id="tab-log"        style="display:none"></div>
+  <div class="content" id="tab-admin"      style="display:none"></div>
+  <div class="content" id="tab-profile"    style="display:none"></div>
+  </div>
 
   <nav class="bottom-nav" id="bottom-nav">
     <button class="nav-item active" onclick="switchTab('submit',this)"  id="nav-submit">
@@ -1091,11 +1124,40 @@ function t(k) { return T[lang][k] || k; }
 
 function toggleLang() { lang = lang === 'en' ? 'zh' : 'en'; renderCurrentTab(); updateTopBar(); updateNavLabels(); }
 
+function toggleDesktopMode(){
+  var isDesktop=document.body.classList.toggle('desktop-mode');
+  localStorage.setItem('desktop_mode', isDesktop?'1':'0');
+  var btn=document.getElementById('desktop-toggle');
+  if(btn) btn.textContent=isDesktop?'📱':'🖥️';
+  // In desktop mode, sync active tab class for CSS visibility
+  _syncDesktopTabClass();
+  renderCurrentTab();
+}
+
+function _syncDesktopTabClass(){
+  var isDesktop=document.body.classList.contains('desktop-mode');
+  document.querySelectorAll('.content').forEach(function(el){
+    el.classList.remove('active-tab');
+    if(isDesktop && el.style.display!=='none') el.classList.add('active-tab');
+  });
+}
+
 function updateTopBar() {
   if(currentUser){
     var compTag=_activeCompany?' · '+_activeCompany:'';
     document.getElementById('app-user-info').textContent=
       currentUser.name+' | '+currentUser.store+' | '+t(currentUser.role)+compTag;
+    // Show desktop toggle only for admin
+    var btn=document.getElementById('desktop-toggle');
+    if(btn){
+      btn.style.display=currentUser.role==='admin'?'flex':'none';
+      // Restore saved desktop mode preference for admin
+      if(currentUser.role==='admin'&&localStorage.getItem('desktop_mode')==='1'){
+        document.body.classList.add('desktop-mode');
+        btn.textContent='📱';
+        _syncDesktopTabClass();
+      }
+    }
   }
 }
 function updateNavLabels() {
@@ -2648,15 +2710,18 @@ async function _doAppLogin(userMatch){
 // ============================================================
 function switchTab(tab,btn) {
   currentTab=tab;
-  document.querySelectorAll('.nav-item').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(function(b){b.classList.remove('active');});
   if(btn) btn.classList.add('active');
-  ['submit','records','summary','attendance','log','admin','profile'].forEach(tt=>{
-    document.getElementById('tab-'+tt).style.display=tt===tab?'block':'none';
+  var isDesktop=document.body.classList.contains('desktop-mode');
+  ['submit','records','summary','attendance','log','admin','profile'].forEach(function(tt){
+    var el=document.getElementById('tab-'+tt);
+    if(!el) return;
+    var show=(tt===tab);
+    el.style.display=show?'block':'none';
+    el.classList.toggle('active-tab',show&&isDesktop);
   });
   renderCurrentTab();
-  // Auto-sync from DB when switching to Records or Summary tabs
   if(tab==='records'||tab==='summary'||tab==='attendance') triggerSyncRefresh();
-  // Admin tab fetches its own data (users + attendance) inside renderAdminTab()
 }
 function renderCurrentTab() {
   if(currentTab==='submit')  renderSubmitTab();
