@@ -226,8 +226,16 @@
   body.desktop-mode #toast { bottom: 24px; }
   body.desktop-mode .modal-overlay { align-items: center; }
   body.desktop-mode .modal-box { border-radius: 18px; max-width: 600px; max-height: 88vh; }
-  /* Desktop: permissions panel grid */
-  body.desktop-mode #perms-panel .perm-feat-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  /* Desktop: permissions panel — grid layout per group section */
+  body.desktop-mode #perms-panel .perm-group-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  body.desktop-mode #perms-panel .perm-group-header {
+    grid-column: 1 / -1;
+  }
   /* Desktop: all-company panel wider */
   body.desktop-mode #all-company-panel .card { padding: 24px; }
   /* Desktop nav separator */
@@ -1601,77 +1609,76 @@ function renderPermissionsPanel(){
     +'</div>';
   }
 
-  // Feature rows — unified for all scopes
-  html += '<div style="display:flex;flex-direction:column;gap:2px">';
-  var _lastGrp='';
+  // Feature rows — grouped grid (works on both mobile and desktop)
   var _grpColors={Submit:'#1d4ed8',Records:'#065f46',Summary:'#6d28d9',Settlement:'#0369a1',Admin:'#b45309',Other:'#374151'};
-  PERM_FEATURES.forEach(function(f, i){
-    var bg = i%2===0?'#f8fafc':'#fff';
-    var globalVal = globalRolePerms[f.key]!==undefined ? !!(globalRolePerms[f.key]) : !!(DEFAULT_PERMS[selRole]&&DEFAULT_PERMS[selRole][f.key]);
-    var bossLocked = isBoss && BOSS_LOCKED_OFF.indexOf(f.key)>=0 && selScope!=='user';
-    // Group header
-    if(f.grp && f.grp!==_lastGrp){
-      _lastGrp=f.grp;
-      html+='<div style="font-size:10px;font-weight:900;letter-spacing:.8px;color:'+(_grpColors[f.grp]||'#64748b')+';background:#f1f5f9;padding:5px 12px;border-radius:8px;margin-top:'+(i===0?'0':'8')+'px">'+f.grp.toUpperCase()+'</div>';
-    }
-    if(bossLocked){
-      html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:9px 12px;background:'+bg+';border-radius:10px;gap:10px;opacity:0.45">'
-        +'<div><div style="font-size:12px;font-weight:700;color:var(--text)">'+f.label+'</div><div style="font-size:10px;color:var(--text2)">'+f.bm+'</div></div>'
-        +'<span style="font-size:10px;font-weight:700;color:#b91c1c;background:#fee2e2;border-radius:20px;padding:3px 8px;flex-shrink:0">🔒 Fixed OFF</span>'
-      +'</div>';
-    } else if(isGlobal||selScope==='user'){
-      // Global or per-user: simple checkbox
-      var chkG;
-      if(selScope==='user'&&selStore!=='__global__'){
-        chkG=sp[selStore]&&sp[selStore][f.key]!==undefined?!!(sp[selStore][f.key]):globalVal;
-      } else {
-        chkG=p[selRole]&&p[selRole][f.key]!==undefined?!!(p[selRole][f.key]):!!(DEFAULT_PERMS[selRole]&&DEFAULT_PERMS[selRole][f.key]);
-      }
-      html += '<label style="display:flex;align-items:center;justify-content:space-between;padding:9px 12px;background:'+bg+';border-radius:10px;cursor:pointer;gap:10px">'
-        +'<div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:700;color:var(--text)">'+f.label+'</div>'
-        +'<div style="font-size:10px;color:var(--text2)">'+f.bm+'</div>'
-        +(selScope==='user'&&selStore!=='__global__'?'<div style="font-size:9px;color:#94a3b8">Global: '+(globalVal?'ON':'OFF')+'</div>':'')
-        +'</div>'
-        +'<input type="checkbox" class="perm-cb" '+(chkG?'checked':'')
-          +' data-scope="'+selScope+'" data-key="'+editKey+'" data-role="'+selRole+'" data-feature="'+f.key
-          +'" style="width:22px;height:22px;accent-color:'+roleColors[selRole]||'#1e3a8a'+';cursor:pointer;flex-shrink:0">'
-      +'</label>';
-    } else {
-      // Store override — 3-state: inherit / ON / OFF
-      var hasOvr    = storeOverride && storeOverride[f.key]!==undefined;
-      var ovrVal    = hasOvr ? !!(storeOverride[f.key]) : null;
-      var state     = !hasOvr ? 'inherit' : (ovrVal ? 'on' : 'off');
-      var sc = {inherit:'#64748b', on:'#10b981', off:'#ef4444'};
-      var sl = {
-        inherit: '↩ Global ('+(globalVal?'ON':'OFF')+')',
-        on:      '✅ Force ON',
-        off:     '❌ Force OFF'
-      };
-      html += '<div style="padding:10px 12px;background:'+bg+';border-radius:10px;'+(hasOvr?'border-left:3px solid '+(ovrVal?'#10b981':'#ef4444')+';':'')+'">'
-        +'<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">'
-          +'<div>'
-            +'<div style="font-size:13px;font-weight:700;color:var(--text)">'+f.label+'</div>'
-            +'<div style="font-size:11px;color:var(--text2)">'+f.bm+'</div>'
-          +'</div>'
-          +'<div style="display:flex;gap:4px;flex-shrink:0">'
-            +['inherit','on','off'].map(function(st){
-              var active=state===st;
-              return '<button class="perm-store-btn" data-store="'+selStore.replace(/"/g,'&quot;')+'"'
-                +' data-role="'+selRole+'" data-feature="'+f.key+'" data-state="'+st+'"'
-                +' onclick="setStorePermState(this)" style="padding:5px 8px;border-radius:8px;font-size:10px;font-weight:700;cursor:pointer;'
-                +'border:2px solid '+(active?sc[st]:'var(--border)')+';'
-                +'background:'+(active?sc[st]:'#f8fafc')+';color:'+(active?'#fff':sc[st])+'">'
-                +(st==='inherit'?'↩':(st==='on'?'ON':'OFF'))
-              +'</button>';
-            }).join('')
-          +'</div>'
-        +'</div>'
-        +'<div style="font-size:10px;color:'+sc[state]+';font-weight:700;margin-top:3px">'+sl[state]+'</div>'
-      +'</div>';
-    }
+  var _groups={};
+  var _grpOrder=[];
+  PERM_FEATURES.forEach(function(f){
+    var g=f.grp||'Other';
+    if(!_groups[g]){_groups[g]=[];_grpOrder.push(g);}
+    _groups[g].push(f);
   });
-  html += '</div>';
+  html+='<div>';
+  _grpOrder.forEach(function(grp){
+    var color=_grpColors[grp]||'#64748b';
+    html+='<div style="font-size:10px;font-weight:900;letter-spacing:.8px;color:'+color
+      +';background:#f1f5f9;padding:5px 12px;border-radius:8px;margin:10px 0 6px">'+grp.toUpperCase()+'</div>';
+    html+='<div class="perm-group-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:5px">';
+    _groups[grp].forEach(function(f){
+      var globalVal=globalRolePerms[f.key]!==undefined?!!(globalRolePerms[f.key]):!!(DEFAULT_PERMS[selRole]&&DEFAULT_PERMS[selRole][f.key]);
+      var bossLocked=isBoss&&BOSS_LOCKED_OFF.indexOf(f.key)>=0&&selScope!=='user';
+      if(bossLocked){
+        html+='<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#fff;border-radius:10px;border:1.5px solid #fee2e2;opacity:.55">'
+          +'<div style="flex:1;min-width:0"><div style="font-size:11px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+f.label+'</div>'
+          +'<div style="font-size:10px;color:var(--text2)">'+f.bm+'</div></div>'
+          +'<span style="font-size:9px;font-weight:800;color:#b91c1c;white-space:nowrap">🔒 OFF</span>'
+        +'</div>';
+      } else if(isGlobal||selScope==='user'){
+        var chkG;
+        if(selScope==='user'&&selStore!=='__global__'){
+          chkG=sp[selStore]&&sp[selStore][f.key]!==undefined?!!(sp[selStore][f.key]):globalVal;
+        } else {
+          chkG=p[selRole]&&p[selRole][f.key]!==undefined?!!(p[selRole][f.key]):!!(DEFAULT_PERMS[selRole]&&DEFAULT_PERMS[selRole][f.key]);
+        }
+        html+='<label style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:#fff;border-radius:10px;'
+          +'border:1.5px solid '+(chkG?color:'var(--border)')+';cursor:pointer">'
+          +'<input type="checkbox" class="perm-cb" '+(chkG?'checked':'')
+            +' data-scope="'+selScope+'" data-key="'+editKey+'" data-role="'+selRole+'" data-feature="'+f.key
+            +'" style="width:20px;height:20px;accent-color:'+color+';cursor:pointer;flex-shrink:0">'
+          +'<div style="flex:1;min-width:0">'
+            +'<div style="font-size:12px;font-weight:700;color:var(--text);line-height:1.3">'+f.label+'</div>'
+            +'<div style="font-size:10px;color:var(--text2);line-height:1.3">'+f.bm+'</div>'
+            +(selScope==='user'&&selStore!=='__global__'?'<div style="font-size:9px;color:#94a3b8">Global: '+(globalVal?'ON':'OFF')+'</div>':'')
+          +'</div>'
+        +'</label>';
+      } else {
+        var stOvr=sp[editKey]&&sp[editKey][selRole]?sp[editKey][selRole]:null;
+        var hasOvr=stOvr&&stOvr[f.key]!==undefined;
+        var ovrVal=hasOvr?!!(stOvr[f.key]):null;
+        var state=!hasOvr?'inherit':(ovrVal?'on':'off');
+        var sc={inherit:'#64748b',on:'#10b981',off:'#ef4444'};
+        html+='<div style="padding:8px 10px;background:#fff;border-radius:10px;border:1.5px solid '
+          +(hasOvr?(ovrVal?'#10b981':'#ef4444'):'var(--border)')+';">'
+          +'<div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:4px;line-height:1.3">'+f.label+'</div>'
+          +'<div style="font-size:10px;color:var(--text2);margin-bottom:6px">'+f.bm+'</div>'
+          +'<div style="display:flex;gap:3px">'
+          +['inherit','on','off'].map(function(st){
+            var act=state===st;
+            return '<button class="perm-store-btn" data-store="'+selStore.replace(/"/g,'&quot;')+'"'
+              +' data-role="'+selRole+'" data-feature="'+f.key+'" data-state="'+st+'"'
+              +' onclick="setStorePermState(this)" style="flex:1;padding:4px;border-radius:6px;font-size:10px;font-weight:800;cursor:pointer;'
+              +'border:1.5px solid '+(act?sc[st]:'var(--border)')+';background:'+(act?sc[st]:'#f8fafc')+';color:'+(act?'#fff':sc[st])+'">'
+              +(st==='inherit'?'↩':'')+(st==='on'?'ON':'')+(st==='off'?'OFF':'')+(st==='inherit'?' '+(globalVal?'ON':'OFF'):'')
+            +'</button>';
+          }).join('')
+          +'</div></div>';
+      }
+    });
+    html+='</div>';
+  });
+  html+='</div>';
 
+  // Action buttons
   // Action buttons — boss gets Save (for view features), not Reset
   if(isGlobal){
     html += '<div style="display:flex;gap:8px;margin-top:12px">'
