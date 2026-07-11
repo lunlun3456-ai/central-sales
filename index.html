@@ -730,7 +730,6 @@ async function syncMalaysiaTime(){
     var serverMs = new Date(d.datetime).getTime();
     _mytOffset = serverMs - Date.now();
     _mytSynced = true;
-    console.log('MYT synced, offset: '+_mytOffset+'ms');
   } catch(e){
     // Fallback: try alternate API
     try{
@@ -741,7 +740,6 @@ async function syncMalaysiaTime(){
       _mytSynced = true;
     } catch(e2){
       _mytOffset = 0; // use device time
-      console.warn('Time sync failed, using device time');
     }
   }
 }
@@ -1586,7 +1584,6 @@ function renderPermissionsPanel(){
   }
 
   // Role selector (skip for user scope — user has their own perms regardless of role)
-  var storeOptions2 = ['__global__'].concat(BRANCHES); // kept for legacy save function
   if(selScope!=='user'){
     html+='<div style="font-size:10px;font-weight:800;color:#64748b;letter-spacing:.5px;margin-bottom:5px">ROLE / PERANAN</div>'
       +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">'
@@ -2182,7 +2179,6 @@ async function fetchAllCompanySales(){
     }catch(e){
       _allCoSales[co]=[];
       _allCoLoading[co]='error';
-      console.warn('fetchAllCompanySales error for '+co+':',e.message);
     }
     renderAllCompanyPanel();
   });
@@ -2531,10 +2527,8 @@ async function fetchLiveUsers(forceRefresh) {
     if(users && typeof users==='object' && !Array.isArray(users) && Object.keys(users).length>0){
       cachedUsers = users;
       saveData('cached_users', users);
-      console.log('✅ Live users loaded:', Object.keys(users).length);
     }
   } catch(e){
-    console.warn('fetchLiveUsers failed, using cache:', e.message);
     const cached = loadData('cached_users', {});
     if(Object.keys(cached).length > 0) cachedUsers = cached;
   }
