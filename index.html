@@ -822,10 +822,26 @@ function setActiveCompany(name){
   if(!_centralUser||!_centralUser.companies) return;
   var url=_centralUser.companies[name]||'';
   _activeCompany=name;
-  // Accept any URL — placeholder URLs will just fail on sync (handled gracefully)
   WEB_APP_URL=url.includes('PASTE_')?'':url;
   localStorage.setItem('active_company',name);
   if(!WEB_APP_URL) showToast('⚠️ Company GAS URL not set. Add it in Central DB Companies sheet.','error');
+}
+
+// Get GAS URL for a specific company name
+// Admin uses this to route edits to the correct company's spreadsheet
+function gasUrlFor(company){
+  if(!company||!_centralUser||!_centralUser.companies) return WEB_APP_URL;
+  var url=String(_centralUser.companies[company]||'');
+  return (!url||url.includes('PASTE_'))?WEB_APP_URL:url;
+}
+
+// POST to a specific company's GAS — for cross-company admin edits
+function gasPost(company,payload){
+  var url=gasUrlFor(company);
+  if(!url||url.length<20) return Promise.reject(new Error('No GAS URL for '+company));
+  return fetch(url,{method:'POST',mode:'no-cors',cache:'no-cache',
+    headers:{'Content-Type':'text/plain'},
+    body:JSON.stringify(payload)});
 }
 var _attSession = []; // in-memory today's records, never wiped by sync
 
@@ -2997,10 +3013,13 @@ function confirmSubmit(withUpload=false) {
     submissionType,changeLog:JSON.stringify(changeLog)
   };
   showToast(lang==='zh'?'正在同步至云端...':'Uploading to Cloud...','pending');
-  fetch(WEB_APP_URL,{
+  // Route to the company the record belongs to (cross-company admin support)
+  var _submitCo=record.company||_activeCompany;
+  var _submitUrl=gasUrlFor(_submitCo)||WEB_APP_URL;
+  fetch(_submitUrl,{
     method:'POST',mode:'no-cors',cache:'no-cache',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({action:'submitSales',...record})
+    body:JSON.stringify(Object.assign({action:'submitSales'},record))
   }).then(()=>{
     // Update local cache immediately so UI reflects change now
     let sales=getSales().filter(item=>!(item.dateKey===s.targetDate&&item.store===s.store));
@@ -4206,10 +4225,8 @@ async function submitAttendance(type){
       remark:remark,accuracy:loc.accuracy,gpsSource:loc.source,deviceId:getDeviceId(),deviceName:getDeviceName(),
       userAgent:navigator.userAgent||'',platform:navigator.platform||''
     };
-    fetch(WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',
-      headers:{'Content-Type':'text/plain'},
-      body:JSON.stringify(Object.assign({action:'submitAttendance'},record))
-    }).catch(function(e){console.warn('sync fail',e);});
+    gasPost(_activeCompany,Object.assign({action:'submitAttendance'},record))
+      .catch(function(){});
     var zone=nearestLocalZone(record.store,record.lat,record.lng);
     // iOS GPS can have 100-500m error — add accuracy as buffer to allowed radius
     var gpsBuffer=Math.max(0,(loc.accuracy||0)-20);
@@ -4451,11 +4468,9 @@ function doEditAttendance(recordId,username,dateKey,type,newTimeHHMM){
   _attSession.forEach(function(r){
     if(String(r.id)===String(recordId)){r.datetime=newDatetime;r.editedBy=currentUser.name;r.editedAt=nowUTC8();}
   });
-  fetch(WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',
-    headers:{'Content-Type':'text/plain'},
-    body:JSON.stringify({action:'editAttendanceTime',recordId:recordId,username:username,
+  gasPost(_activeCompany,{action:'editAttendanceTime',recordId:recordId,username:username,
       dateKey:dateKey,type:type,newDatetime:newDatetime,
-      editedBy:currentUser.name,editedRole:currentUser.role,editedAt:nowUTC8()})}).catch(function(){});
+      editedBy:currentUser.name,editedRole:currentUser.role,editedAt:nowUTC8()}).catch(function(){});
   showToast(('Time updated: ')+username+' '+newTimeHHMM+' ✅','success');
   renderAdminTab();
   if(currentTab==='attendance') renderAttendanceTab();
@@ -4714,7 +4729,9 @@ async function bulkDecideApprovals(decision){
   renderAdminTab();
   setTimeout(function(){triggerSyncRefresh();},1500);
 }
-async function decideApproval(id,decision){ await fetch(WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:decision==='approve'?'approveApprovalRequest':'rejectApprovalRequest',id,approver:currentUser.name,approverRole:currentUser.role,approverStore:currentUser.store})}); showToast(decision==='approve'?(lang==='zh'?'已批准。':'Approved.'):(lang==='zh'?'已拒绝。':'Rejected.'),'success'); saveApprovals(getApprovals().map(r=>r.id===id?Object.assign({},r,{status:decision==='approve'?'approved':'rejected'}):r)); renderAdminTab(); setTimeout(()=>triggerSyncRefresh(),1500); }
+async function decideApproval(id,decision,company){
+  var _co=company||_activeCompany;
+  await gasPost(_co,{action:decision==='approve'?'approveApprovalRequest':'rejectApprovalRequest',id,approver:currentUser.name,approverRole:currentUser.role,approverStore:currentUser.store}); showToast(decision==='approve'?(lang==='zh'?'已批准。':'Approved.'):(lang==='zh'?'已拒绝。':'Rejected.'),'success'); saveApprovals(getApprovals().map(r=>r.id===id?Object.assign({},r,{status:decision==='approve'?'approved':'rejected'}):r)); renderAdminTab(); setTimeout(()=>triggerSyncRefresh(),1500); }
 function renderAttendanceReport(users){ const days=attendanceReportMode==='weekly'?7:31; const start=new Date(attendanceDateFilter); start.setDate(start.getDate()-days+1); const rows=users.filter(u=>attendanceStoreFilter==='all'||u.store===attendanceStoreFilter).map(u=>{ const rec=getAllAttendance().filter(r=>r.username===u.username&&new Date(r.dateKey)>=start&&new Date(r.dateKey)<=new Date(attendanceDateFilter)); return {name:u.name||u.username,present:new Set(rec.filter(r=>r.type==='check_in'&&r.status!=='rejected').map(r=>r.dateKey)).size,late:rec.filter(r=>r.status==='late').length,early:rec.filter(r=>r.status==='early_leave').length}; }); return `<div style="display:flex;justify-content:space-between;align-items:center"><div style="font-size:13px;font-weight:800">${attendanceReportMode==='weekly'?'Weekly':'Monthly'} Attendance Summary</div><select onchange="attendanceReportMode=this.value;renderAdminTab()" style="width:auto;padding:6px 10px"><option value="weekly" ${attendanceReportMode==='weekly'?'selected':''}>Weekly</option><option value="monthly" ${attendanceReportMode==='monthly'?'selected':''}>Monthly</option></select></div>${rows.map(r=>`<div class="stat-row"><span class="stat-label">${r.name}</span><span class="stat-value" style="font-size:13px">P ${r.present} - L ${r.late} - E ${r.early}</span></div>`).join('')}`; }
 function renderZoneScheduleTools(branches,users){
   var ZH=lang==='zh'; var EN=lang==='en';
@@ -5340,7 +5357,8 @@ function openSettlementBreakdown(sd){
     window._bdCash=c;window._bdQr=q;window._bdCard=k;window._bdBank=b;
     var sales=getSales();var ri=sales.findIndex(function(r){return r.store===window._bdStore&&r.dateKey===window._bdDate;});
     if(ri>=0){sales[ri].cash=c;sales[ri].qr=q;sales[ri].card=k;sales[ri].bank=b;saveSales(sales);
-      fetch(WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',headers:{'Content-Type':'text/plain'},body:JSON.stringify(Object.assign({action:'submitSales'},sales[ri]))}).catch(function(){});}
+      gasPost(_activeCompany,Object.assign({action:'submitSales'},sales[ri])).catch(function(){});
+    }
     ov.remove();openSettlementUploadFirst();
   };
 }
