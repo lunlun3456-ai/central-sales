@@ -233,8 +233,8 @@
   /* Desktop nav separator */
   body.desktop-mode .nav-separator { height: 1px; background: var(--border); margin: 8px 4px; }
   /* Desktop mode toggle button */
-  #desktop-toggle { display: none; }
-  body.desktop-mode #desktop-toggle { background: #1e3a8a; color: #fff; }
+  /* Desktop mode toggle — visibility controlled by JS in updateTopBar */
+  body.desktop-mode #desktop-toggle { background: #1e3a8a !important; color: #fff !important; }
   @media (max-width: 768px) {
     body.desktop-mode { max-width: 100% !important; }
     body.desktop-mode #app-screen { grid-template-columns: 1fr; }
@@ -465,7 +465,7 @@
     </div>
     <div class="topbar-right">
       <button class="btn refresh-btn" onclick="triggerSyncRefresh()" id="sync-btn">🔄</button>
-      <button id="desktop-toggle" onclick="toggleDesktopMode()" title="Desktop / Mobile View" style="background:rgba(255,255,255,0.15);border:none;border-radius:50%;width:40px;height:40px;font-size:18px;cursor:pointer;display:none">🖥️</button>
+      <button id="desktop-toggle" onclick="toggleDesktopMode()" title="Desktop / Mobile View" style="background:rgba(255,255,255,0.15);border:none;border-radius:50%;width:40px;height:40px;font-size:18px;cursor:pointer;display:none;align-items:center;justify-content:center">🖥️</button>
       <button class="lang-btn" onclick="toggleLang()">中/EN</button>
     </div>
   </div>
@@ -1143,20 +1143,22 @@ function _syncDesktopTabClass(){
 }
 
 function updateTopBar() {
-  if(currentUser){
-    var compTag=_activeCompany?' · '+_activeCompany:'';
-    document.getElementById('app-user-info').textContent=
-      currentUser.name+' | '+currentUser.store+' | '+t(currentUser.role)+compTag;
-    // Show desktop toggle only for admin
-    var btn=document.getElementById('desktop-toggle');
-    if(btn){
-      btn.style.display=currentUser.role==='admin'?'flex':'none';
-      // Restore saved desktop mode preference for admin
-      if(currentUser.role==='admin'&&localStorage.getItem('desktop_mode')==='1'){
-        document.body.classList.add('desktop-mode');
-        btn.textContent='📱';
-        _syncDesktopTabClass();
-      }
+  if(!currentUser) return;
+  var compTag=_activeCompany?' · '+_activeCompany:'';
+  document.getElementById('app-user-info').textContent=
+    currentUser.name+' | '+currentUser.store+' | '+t(currentUser.role)+compTag;
+  // Show desktop toggle button for admin only
+  var btn=document.getElementById('desktop-toggle');
+  if(btn){
+    var isAdmin=currentUser.role==='admin';
+    btn.style.cssText=isAdmin
+      ?'background:rgba(255,255,255,0.15);border:none;border-radius:50%;width:40px;height:40px;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center'
+      :'display:none';
+    // Restore desktop mode if admin had it on
+    if(isAdmin && localStorage.getItem('desktop_mode')==='1'){
+      document.body.classList.add('desktop-mode');
+      btn.textContent='📱';
+      _syncDesktopTabClass();
     }
   }
 }
@@ -2676,6 +2678,7 @@ async function _doAppLogin(userMatch){
     currentUser=Object.assign({},userMatch);
     document.getElementById('login-screen').classList.remove('active');
     document.getElementById('app-screen').classList.add('active');
+    // updateTopBar AFTER screen switch so desktop-toggle button is in visible DOM
     try{updateTopBar();}catch(e){console.warn('updateTopBar:',e);}
     try{updateNavLabels();}catch(e){console.warn('updateNavLabels:',e);}
     try{applyPermissionsToNav();}catch(e){console.warn('applyPermissionsToNav:',e);}
