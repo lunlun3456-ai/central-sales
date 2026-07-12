@@ -3280,6 +3280,22 @@ function renderRecordsTab() {
 // ============================================================
 // SUMMARY TAB
 // ============================================================
+// Switch company from Summary tab and re-sync sales data
+async function switchSummaryCompany(co){
+  if(co===_activeCompany) return;
+  setActiveCompany(co);
+  updateTopBar();
+  showToast('Loading '+co+' sales...','pending');
+  await triggerSyncRefresh();
+  renderSummaryTab();
+  // Also render all-company panel
+  if(hasPerm('view_all_companies')){
+    var acp=document.getElementById('all-company-panel');
+    if(acp){ renderAllCompanyPanel(); }
+    if(!_allCoFetched){ _allCoFetched=true; fetchAllCompanySales(); }
+  }
+}
+
 function renderSummaryTab() {
   const role    = currentUser.role;
   const isBoss  = role==='boss';
@@ -3356,6 +3372,21 @@ function renderSummaryTab() {
       <h2 style="font-size:18px;font-weight:900">${t('summaryTab')}</h2>
       <button class="btn refresh-inline" onclick="triggerSyncRefresh()">🔄 ${t('refresh')}</button>
     </div>
+
+    ${hasPerm('view_all_companies')&&_centralUser&&Object.keys(_centralUser.companies||{}).length>1?`
+    <div class="card" style="background:#eff6ff;border:2px solid #bfdbfe;margin-bottom:10px">
+      <div style="font-size:11px;font-weight:800;color:#1e3a8a;margin-bottom:8px">🏢 ${lang==='en'?'VIEWING COMPANY':'SYARIKAT AKTIF'}</div>
+      <div style="display:flex;gap:5px;flex-wrap:wrap">
+        ${Object.keys(_centralUser.companies).map(co=>`
+          <button onclick="switchSummaryCompany('${co.replace(/'/g,"\\'")}\")"
+            style="padding:6px 10px;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;
+              border:2px solid ${co===_activeCompany?'#1e3a8a':'var(--border)'};
+              background:${co===_activeCompany?'#1e3a8a':'#f8fafc'};
+              color:${co===_activeCompany?'#fff':'#334155'}">${co}</button>`).join('')}
+      </div>
+    </div>
+    ${hasPerm('view_all_companies')?'<div id="all-company-panel" style="margin-bottom:12px"></div>':''}
+    `:''}
 
     <!-- FILTER CARD -->
     <div class="card" style="padding:14px;background:#eff6ff;margin-bottom:12px">
@@ -3464,6 +3495,14 @@ function renderSummaryTab() {
         </div>`;
       }).join('')}
     </div>`;
+  // Render all-company panel in Summary tab
+  if(hasPerm('view_all_companies')){
+    var acp=document.getElementById('all-company-panel');
+    if(acp){
+      renderAllCompanyPanel();
+      if(!_allCoFetched){ _allCoFetched=true; fetchAllCompanySales(); }
+    }
+  }
 }
 function updateSummaryDateRange(val){summaryViewMode=val;renderSummaryTab();}
 function updateSummaryCustomDate(val){summaryCustDate=val;renderSummaryTab();}
@@ -4965,7 +5004,27 @@ async function createDatabaseBackup(){
 // ============================================================
 var _adminRenderSeq=0;
 async function fetchAttendanceForAdmin(){
-  // Independent attendance fetch — used by renderAdminTab and manual sync button
+  // For admin: fetch from ALL company GAS endpoints and merge
+  if(currentUser.role==='admin'&&_centralUser&&_centralUser.companies){
+    var allAtt=[];
+    var companies=Object.keys(_centralUser.companies);
+    await Promise.all(companies.map(async function(co){
+      var url=_centralUser.companies[co]||'';
+      if(!url||url.includes('PASTE_')) return;
+      try{
+        var resp=await fetch(url+'?action=getAttendance&t='+Date.now(),{method:'GET',cache:'no-cache'});
+        var r=await resp.json();
+        var arr=(r&&Array.isArray(r.attendance))?r.attendance:(Array.isArray(r)?r:[]);
+        arr.forEach(function(a){ a._company=co; allAtt.push(a); });
+      }catch(e){}
+    }));
+    if(allAtt.length>0){
+      _serverAtt=allAtt; _serverAttLoaded=true;
+      saveData('attendance_records',[]);
+      return true;
+    }
+  }
+  // Non-admin or fallback: fetch from active company only
   try{
     var r=await gasGet('getAttendance');
     var attArr=(r&&Array.isArray(r.attendance))?r.attendance:(Array.isArray(r)?r:null);
@@ -4974,12 +5033,11 @@ async function fetchAttendanceForAdmin(){
       if(r2&&Array.isArray(r2.attendance)) attArr=r2.attendance;
     }
     if(attArr!==null){
-      _serverAtt=attArr;
-      _serverAttLoaded=true;
+      _serverAtt=attArr; _serverAttLoaded=true;
       saveData('attendance_records',[]);
       return true;
     }
-  }catch(e){ console.warn('attendance fetch failed:',e.message); }
+  }catch(e){}
   return false;
 }
 async function fetchApprovalsForAdmin(){
@@ -5016,11 +5074,23 @@ async function renderAdminTab() {
   if(_myRenderId!==_adminRenderSeq) return;
   const allUsers=cachedUsers;
   const pending=[]; const active=[]; const resigned=[];
-  Object.entries(allUsers).forEach(([uname,u])=>{
-    const s=String(u.status||'active').toLowerCase();
-    if(s==='pending')  pending.push(Object.assign({},u,{username:uname}));
-    else if(s==='resigned'||s==='inactive'||s==='disabled') resigned.push(Object.assign({},u,{username:uname,status:s}));
-    else               active.push(Object.assign({},u,{username:uname}));
+  // Filter users by company for display
+  // Admin sees a company filter; others see only their own company
+  var _userCompanyFilter=window._userCompanyFilter||_activeCompany||'all';
+  if(currentUser.role!=='admin') _userCompanyFilter=_activeCompany||currentUser.homeCompany||'';
+  window._userCompanyFilter=_userCompanyFilter;
+
+  Object.entries(allUsers).forEach(function(entry){
+    var uname=entry[0]; var u=entry[1];
+    var s=String(u.status||'active').toLowerCase();
+    // Company filter
+    var uCo=String(u.company||u.homeCompany||'');
+    var matchCo=_userCompanyFilter==='all'||!_userCompanyFilter||uCo===_userCompanyFilter||uCo==='all';
+    if(!matchCo) return;
+    var obj=Object.assign({},u,{username:uname});
+    if(s==='pending')  pending.push(obj);
+    else if(s==='resigned'||s==='inactive'||s==='disabled') resigned.push(obj);
+    else               active.push(obj);
   });
   const pendingHtml=pending.length>0?`
     <div class="pending-card">
@@ -5080,25 +5150,26 @@ async function renderAdminTab() {
     ${renderOperationsDashboard()}
     ${canManageUsers()?pendingHtml:''}
     ${canManageUsers()?`
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
         <div style="font-size:15px;font-weight:800">${t('userMgmt')}</div>
         <button class="btn refresh-inline" onclick="openAddUser()" style="background:var(--success);color:#fff;border:none">${t('addUser')}</button>
       </div>
+      ${currentUser.role==='admin'?`
+      <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px">
+        <button onclick="window._userCompanyFilter='all';renderAdminTab()" style="padding:5px 10px;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;border:1.5px solid ${(_userCompanyFilter==='all')?'#1e3a8a':'var(--border)'};background:${(_userCompanyFilter==='all')?'#1e3a8a':'#f8fafc'};color:${(_userCompanyFilter==='all')?'#fff':'#334155'}">All</button>
+        ${ALL_COMPANIES.map(co=>`<button onclick="window._userCompanyFilter='${co.replace(/'/g,"\\'")}';renderAdminTab()" style="padding:5px 10px;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;border:1.5px solid ${(_userCompanyFilter===co)?'#1e3a8a':'var(--border)'};background:${(_userCompanyFilter===co)?'#1e3a8a':'#f8fafc'};color:${(_userCompanyFilter===co)?'#fff':'#334155'}">${co}</button>`).join('')}
+      </div>`:''}
       <div class="card">${activeHtml||`<div class="empty-state"><p>No active users</p></div>`}</div>
       ${resignedHtml}
     `:''}
     ${hasPerm('role_perm')?'<div id="perms-panel" style="margin-top:8px"></div>':''}
-    ${hasPerm('view_all_companies')?'<div id="all-company-panel" style="margin-top:8px"></div>':''}
-    ${hasPerm('monthly_report')?'<div id="monthly-report-panel"></div>':''}`;
+    ${hasPerm('monthly_report')?'<div id="monthly-report-panel"></div>':''}
+    <div id="zone-schedule-panel">${renderZoneScheduleTools(branches,users)}</div>`;
   if(hasPerm('role_perm')) renderPermissionsPanel();
   if(hasPerm('monthly_report')) renderMonthlyReportPanel();
-  if(hasPerm('view_all_companies')){
-    renderAllCompanyPanel();
-    if(!_allCoFetched){ _allCoFetched=true; fetchAllCompanySales(); }
-  }
-  // Admin: sync zones+schedules from ALL company GAS so they display correctly
+  // Sync zones+schedules from ALL companies in background (no re-render loop)
   if(currentUser.role==='admin'&&(hasPerm('work_zone')||hasPerm('work_schedule'))){
-    syncAllCompanyZonesAndSchedules().catch(function(){});
+    setTimeout(function(){syncAllCompanyZonesAndSchedules().catch(function(){});},1000);
   }
 }
 async function approveUser(username) {
