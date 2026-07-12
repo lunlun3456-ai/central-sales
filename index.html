@@ -750,7 +750,6 @@ function nowUTC8(){
   var s=getMYT().toLocaleString('sv-SE',{timeZone:'Asia/Kuala_Lumpur'});
   return s.replace(' ','T'); // plain MYT — no +08:00
 }
-function fmtTimeSUTC8(s){if(!s)return"--:--:--";try{var u=new Date(new Date(s).getTime()+_U8);return("0"+u.getUTCHours()).slice(-2)+":"+("0"+u.getUTCMinutes()).slice(-2)+":"+("0"+u.getUTCSeconds()).slice(-2);}catch(e){return"--:--:--";}}
 function fmtTimeUTC8(s){
   if(!s||s==='') return '--:--';
   try{
@@ -815,10 +814,6 @@ function gasUrlForStore(store){
 
 // Smart URL: uses store if provided, else active company
 // Use this for all company GAS writes
-function smartGasUrl(store){
-  if(store&&store!=='HQ'&&store!=='all') return gasUrlForStore(store);
-  return gasUrlFor(_activeCompany)||WEB_APP_URL;
-}
 
 // Admin helper — returns stores visible to current user
 // Only admin sees ALL stores across ALL companies
@@ -841,7 +836,6 @@ var _activeCompany = localStorage.getItem('active_company') || '';
 var _centralUser   = null; // full user profile returned by Central GAS
 
 function _allowedCompanies(){ return _centralUser?(_centralUser.allowedCompanies||[]):[]; }
-function _isSuperAdmin()    { return _centralUser?!!_centralUser.isSuperAdmin:false; }
 
 function setActiveCompany(name){
   if(!_centralUser||!_centralUser.companies) return;
@@ -1008,9 +1002,7 @@ async function syncAllCompanyZonesAndSchedules(){
 function saveWorkZones(arr){ cachedWorkZones = arr || []; saveData('work_zones', cachedWorkZones); }
 function saveWorkSchedules(arr){ cachedWorkSchedules = arr || []; saveData('work_schedules', cachedWorkSchedules); }
 function saveBackups(arr){ cachedBackups = arr || []; saveData('backup_log', cachedBackups); }
-function saveUserDevices(arr){ cachedUserDevices = arr || []; saveData('user_devices', cachedUserDevices); }
 function isExecutiveRole(role){ return ['admin','manager'].includes(String(role||'').toLowerCase()); }
-function isViewerRole(role)   { return String(role||'').toLowerCase()==='boss'; }
 function isAdminRole(role)    { return String(role||'').toLowerCase()==='admin'; }
 function canManageUsers(){ return hasPerm('user_mgmt'); }
 function isCashMovementApproved(r){ return !r.status || r.status === 'approved'; }
@@ -1415,8 +1407,8 @@ async function syncAttendanceNow(){
     showToast(t('syncDoneMsg'),'success');
     return;
   }
-  var ok=await fetchAttendanceForAdmin();
-  if(ok){
+  var ok=await fetchAdminData();
+  if(ok!==false){
     showToast(t('syncDoneMsg'),'success');
     if(currentTab==='attendance') _renderAttendanceContent();
   } else {
@@ -2256,7 +2248,6 @@ async function fetchAllCompanySales(){
 }
 
 // Auto-fetch when panel first renders if no data yet
-var _allCoFetched=false;
 
 function renderMonthlyReportPanel(){
   var el=document.getElementById('monthly-report-panel');
@@ -5011,6 +5002,40 @@ async function createDatabaseBackup(){
 // ADMIN TAB
 // ============================================================
 var _adminRenderSeq=0;
+// Single fetch per company — attendance + approvals + settlements in one call
+async function fetchAdminData(){
+  var companies=(_centralUser&&_centralUser.companies)||{};
+  var urls=Object.keys(companies).map(function(co){return {co:co,url:companies[co]||''};})
+    .filter(function(e){return e.url&&!e.url.includes('PASTE_')&&e.url.length>20;});
+
+  if(urls.length===0){
+    // No company URLs set — try active company
+    var u=gasUrlFor(_activeCompany)||WEB_APP_URL;
+    if(u&&u.length>20) urls=[{co:_activeCompany,url:u}];
+    else return;
+  }
+
+  var allAtt=[]; var allApprovals=[]; var allSettlements=[]; var allLocks=[];
+
+  await Promise.all(urls.map(async function(e){
+    try{
+      var resp=await fetchWithTimeout(e.url+'?action=getAppData&t='+Date.now(),
+        {method:'GET',cache:'no-cache'},8000);
+      var d=await resp.json();
+      if(!d) return;
+      if(Array.isArray(d.attendance))     d.attendance.forEach(function(a){a._company=e.co;allAtt.push(a);});
+      if(Array.isArray(d.approvals))      d.approvals.forEach(function(a){a._company=e.co;allApprovals.push(a);});
+      if(Array.isArray(d.settlements))    d.settlements.forEach(function(s){s._company=e.co;allSettlements.push(s);});
+      if(Array.isArray(d.settlementLocks))d.settlementLocks.forEach(function(l){l._company=e.co;allLocks.push(l);});
+    }catch(e2){}
+  }));
+
+  if(allAtt.length>0){_serverAtt=allAtt;_serverAttLoaded=true;saveData('attendance_records',[]);}
+  if(allApprovals.length>0) saveApprovals(allApprovals);
+  if(allSettlements.length>0) saveSettlementsData(allSettlements);
+  if(allLocks.length>0) saveSettlementLocks(allLocks);
+}
+
 // Fetch with timeout — prevents hanging forever on slow/dead GAS
 function fetchWithTimeout(url,opts,ms){
   ms=ms||8000;
@@ -5020,56 +5045,6 @@ function fetchWithTimeout(url,opts,ms){
   return fetch(url,fetchOpts).finally(function(){if(timer)clearTimeout(timer);});
 }
 
-async function fetchAttendanceForAdmin(){
-  // For admin: fetch from ALL company GAS endpoints and merge
-  if(currentUser.role==='admin'&&_centralUser&&_centralUser.companies){
-    var allAtt=[];
-    var companies=Object.keys(_centralUser.companies);
-    await Promise.all(companies.map(async function(co){
-      var url=_centralUser.companies[co]||'';
-      if(!url||url.includes('PASTE_')) return;
-      try{
-        // Use getAppData which always exists — getAttendance may not
-        var resp=await fetchWithTimeout(url+'?action=getAppData&t='+Date.now(),{method:'GET',cache:'no-cache'},8000);
-        var d=await resp.json();
-        var arr=Array.isArray(d.attendance)?d.attendance:[];
-        arr.forEach(function(a){ a._company=co; allAtt.push(a); });
-      }catch(e){}
-    }));
-    if(allAtt.length>0){
-      _serverAtt=allAtt; _serverAttLoaded=true;
-      saveData('attendance_records',[]);
-    }
-    return true; // always return true for admin — don't fall through
-  }
-  // Non-admin: fetch from active company only
-  var url=gasUrlFor(_activeCompany)||WEB_APP_URL;
-  if(!url||url.length<20) return false;
-  try{
-    var resp=await fetchWithTimeout(url+'?action=getAppData&t='+Date.now(),{method:'GET',cache:'no-cache'},8000);
-    var d=await resp.json();
-    if(d&&Array.isArray(d.attendance)){
-      _serverAtt=d.attendance; _serverAttLoaded=true;
-      saveData('attendance_records',[]);
-      return true;
-    }
-  }catch(e){}
-  return false;
-}
-
-async function fetchApprovalsForAdmin(){
-  var url=gasUrlFor(_activeCompany)||WEB_APP_URL;
-  if(!url||url.length<20) return false;
-  try{
-    var resp=await fetchWithTimeout(url+'?action=getAppData&t='+Date.now(),{method:'GET',cache:'no-cache'},8000);
-    var d=await resp.json();
-    if(d&&Array.isArray(d.approvals)){
-      saveApprovals(d.approvals);
-      return true;
-    }
-  }catch(e){}
-  return false;
-}
 var _adminRendering=false;
 async function renderAdminTab() {
   if(_adminRendering) return;
@@ -5083,7 +5058,8 @@ async function renderAdminTab() {
     }
     var _myRenderId=++_adminRenderSeq;
     document.getElementById('tab-admin').innerHTML=`<div class="spinner-wrap"><div class="spin"></div>${EN?'Loading...':'加载中...'}</div>`;
-    await Promise.all([fetchLiveUsers(true), fetchAttendanceForAdmin(), fetchApprovalsForAdmin()]);
+    // ONE fetch per company (not 3 separate calls) — much faster
+    await Promise.all([fetchLiveUsers(true), fetchAdminData()]);
     if(_myRenderId!==_adminRenderSeq){ _adminRendering=false; return; }
 
     const allUsers=cachedUsers;
