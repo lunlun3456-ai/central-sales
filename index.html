@@ -23,12 +23,12 @@
   /* ═══ KENKO-INSPIRED DESIGN SYSTEM ════════════════════════════ */
   :root {
     /* Dark background layers */
-    --bg:          #0e1117;
-    --bg2:         #161b26;
-    --card:        #1c2333;
-    --card2:       #222b3e;
-    --glass:       rgba(255,255,255,0.05);
-    --glass-bdr:   rgba(255,255,255,0.08);
+    --bg:          #141922;
+    --bg2:         #1a2234;
+    --card:        #202938;
+    --card2:       #27334a;
+    --glass:       rgba(255,255,255,0.06);
+    --glass-bdr:   rgba(255,255,255,0.10);
 
     /* Accent gradient — electric blue-violet */
     --accent1:     #5b6ef5;
@@ -45,12 +45,12 @@
     --warning-dk:  #d97706;
 
     /* Text */
-    --text:        #f1f5f9;
-    --text2:       #8892a4;
-    --text3:       #4a5568;
+    --text:        #eef2f8;
+    --text2:       #8b95a8;
+    --text3:       #5c6880;
 
     /* Borders & shadows */
-    --border:      rgba(255,255,255,0.07);
+    --border:      rgba(255,255,255,0.09);
     --shadow:      0 4px 24px rgba(0,0,0,0.4);
     --shadow-lg:   0 12px 48px rgba(0,0,0,0.5);
     --radius:      20px;
@@ -392,6 +392,57 @@
 
   summary::-webkit-details-marker { display:none; }
   * { -webkit-tap-highlight-color:transparent; }
+
+  /* ── Record rows — sales / settlement / attendance ── */
+  .record-item {
+    display: flex; align-items: flex-start; gap: 12px;
+    padding: 12px 0; border-bottom: 1px solid var(--border);
+  }
+  .record-item:last-child { border-bottom: none; }
+  .record-icon {
+    width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; background: var(--card2);
+  }
+  .record-info { flex: 1; min-width: 0; }
+  /* Store name + submitter — prominent */
+  .record-store {
+    font-size: 14px; font-weight: 700; color: var(--text);
+    display: flex; align-items: center; flex-wrap: wrap; gap: 5px;
+    margin-bottom: 3px;
+  }
+  /* Amount — large accent */
+  .record-amount {
+    font-size: 18px; font-weight: 900; color: var(--text);
+    letter-spacing: -.5px; margin: 2px 0 4px;
+  }
+  /* Sub-details — small muted */
+  .record-meta {
+    font-size: 11px; color: var(--text2); font-weight: 400;
+    line-height: 1.5;
+  }
+  .record-meta b { color: var(--text); font-weight: 600; }
+  /* Breakdown amounts inline */
+  .record-breakdown {
+    display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;
+  }
+  .record-breakdown span {
+    font-size: 11px; color: var(--text2);
+    background: var(--bg2); border-radius: 6px;
+    padding: 2px 7px; font-weight: 500;
+  }
+  .record-breakdown span b { color: var(--text); font-weight: 700; }
+  /* Status pills */
+  .status-pill {
+    display: inline-block; padding: 1px 7px; border-radius: 20px;
+    font-size: 10px; font-weight: 700;
+  }
+  .status-present  { background: rgba(34,197,94,.15);  color: var(--success); }
+  .status-late     { background: rgba(244,63,94,.12);  color: var(--danger); }
+  .status-absent   { background: rgba(244,63,94,.08);  color: var(--danger); }
+  .status-approved,.status-confirmed { background: rgba(34,197,94,.15); color: var(--success); }
+  .status-pending  { background: rgba(245,158,11,.12); color: var(--warning); }
+  .status-rejected { background: rgba(244,63,94,.12);  color: var(--danger); }
 </style>
 </head>
 <script>
@@ -3347,20 +3398,24 @@ function renderRecordsTab() {
           <div class="record-icon">🏪</div>
           <div class="record-info">
             <div class="record-store">
-              ${r.store}
-              <span class="badge">${r.submitter||''}</span>
-              <span style="display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:800;background:${isUpdate?'#fff3cd':'#d1fae5'};color:${isUpdate?'#856404':'#0f5132'};margin-left:4px">
+              <span style="font-size:15px;font-weight:800;color:var(--text)">${r.store}</span>
+              <span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;background:rgba(139,149,168,.15);color:var(--text2)">${r.submitter||''}</span>
+              <span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;background:${isUpdate?'rgba(245,158,11,.12)':'rgba(34,197,94,.12)'};color:${isUpdate?'var(--warning)':'var(--success)'}">
                 ${isUpdate?t('updateSalesLabel'):t('dailySalesLabel')}
               </span>
             </div>
-            <div class="record-meta">
-              💵 RM${parseFloat(r.cash||0).toFixed(2)} &nbsp;📱 RM${parseFloat(r.qr||0).toFixed(2)}<br>
-              💳 RM${parseFloat(r.card||0).toFixed(2)} &nbsp;🏦 RM${parseFloat(r.bank||0).toFixed(2)}
+            <div class="record-breakdown">
+              <span>💵 <b>RM${parseFloat(r.cash||0).toFixed(2)}</b></span>
+              <span>📱 <b>RM${parseFloat(r.qr||0).toFixed(2)}</b></span>
+              <span>💳 <b>RM${parseFloat(r.card||0).toFixed(2)}</b></span>
+              <span>🏦 <b>RM${parseFloat(r.bank||0).toFixed(2)}</b></span>
             </div>
-            ${r.remark?`<div style="font-size:12px;color:var(--accent);margin-top:2px;">📝 ${r.remark}</div>`:''}
-            <div style="font-size:10px;color:#94a3b8;margin-top:3px">
+            ${r.remark?`<div style="font-size:11px;color:var(--accent2);margin-top:4px">📝 ${r.remark}</div>`:''}
+            <div class="record-meta" style="margin-top:4px">
               📅 ${cleanDateKey(r.dateKey)}
-              ${r.dateTime?` &nbsp;🕐 ${String(r.dateTime).slice(11,16)}`:(r.createdAt?` &nbsp;🕐 ${String(r.createdAt).slice(11,16)}`:'')}
+              ${r.dateTime?` · ${String(r.dateTime).slice(11,16)}`:(r.createdAt?` · ${String(r.createdAt).slice(11,16)}`:'')}
+              ${isUpdate&&r.updatedAt?` · ✏️ ${String(r.updatedAt).slice(0,16).replace('T',' ')}`:''}
+            </div>
               ${isUpdate&&r.updatedAt?` &nbsp;✏️ ${String(r.updatedAt).slice(0,16).replace('T',' ')}`:''}
             </div>
           </div>
@@ -4727,34 +4782,42 @@ function attendanceRowHtml(r){
   var canReset=['admin','manager','supervisor'].includes(currentUser.role);
   var isVoided=r.status==='voided'||r.status==='rejected';
   var isMissed=r.status==='missed_checkout';
+  var isIn=r.type==='check_in';
   var resetBtn=canReset&&!isVoided&&!isMissed
-    ?('<button class="btn-sm att-reset-btn" style="background:#fee2e2;color:#dc2626;font-size:10px;margin-left:6px"'
+    ?('<button class="btn-sm" style="background:rgba(244,63,94,.12);color:var(--danger);border-color:rgba(244,63,94,.2)"'
       +' data-username="'+r.username+'" data-datekey="'+r.dateKey+'" data-id="'+r.id+'"'
       +' data-type="'+(r.type||'')+'" data-time="'+(r.datetime?fmtTimeUTC8(r.datetime):'')+'"'
       +'>🗑</button>')
     :'';
   var editBtn=canReset&&!isVoided
-    ?('<button class="btn-sm att-edit-btn" style="background:'+(isMissed?'#fff7ed;color:#92400e':'#eff6ff;color:#1e3a8a')+';font-size:10px;margin-left:4px;font-weight:800"'
+    ?('<button class="btn-sm att-edit-btn" style="background:'+(isMissed?'rgba(245,158,11,.12);color:var(--warning);border-color:rgba(245,158,11,.2)':'rgba(91,110,245,.12);color:var(--accent2);border-color:rgba(91,110,245,.2)')+'"'
       +' data-id="'+r.id+'" data-username="'+r.username+'" data-datekey="'+r.dateKey+'"'
       +' data-type="'+(r.type||'')+'" data-datetime="'+(r.datetime||'')+'"'
       +'>'+(isMissed?'⚠️ Fix':'✏️')+'</button>')
     :'';
-  var rowStyle=isMissed?'border-left:3px solid #f59e0b;background:#fffbeb;':'';
-  var statusDisplay=isMissed?'⚠️ Missing Checkout':String(r.status||'present').replace('_',' ');
-  var statusColor=isMissed?'#92400e':'';
-  return '<div class="record-item" style="'+rowStyle+'">'
-    +'<div class="record-icon" style="'+(isMissed?'background:#fff7ed;color:#92400e':'')+'">AT</div>'
-    +'<div class="record-info" style="flex:1">'
-      +'<div class="record-store" style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">'
-        +'<b>'+(r.name||r.username)+'</b>'
-        +' <span class="status-pill status-'+(r.status||'present')+'" style="'+(statusColor?'color:'+statusColor+';background:#fff7ed':'')+'">'+statusDisplay+'</span>'
+  var statusDisplay=isMissed?'⚠️ Missing':String(r.status||'present').replace('_',' ');
+  var typeIcon=isIn?'🟢':'🔴';
+  var typeLbl=isIn?'Check In':'Check Out';
+  return '<div style="display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)'+(isMissed?';border-left:3px solid var(--warning);padding-left:10px':'')+';">'
+    // Avatar circle with check-in/out color
+    +'<div style="width:36px;height:36px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:16px;background:'+(isMissed?'rgba(245,158,11,.15)':isIn?'rgba(34,197,94,.12)':'rgba(244,63,94,.1)')+'">'+typeIcon+'</div>'
+    +'<div style="flex:1;min-width:0">'
+      // Name — large, bold
+      +'<div style="font-size:14px;font-weight:700;color:var(--text);display:flex;align-items:center;flex-wrap:wrap;gap:6px">'
+        +(r.name||r.username)
+        +'<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;background:'+(isMissed?'rgba(245,158,11,.15)':r.status==='late'?'rgba(244,63,94,.12)':'rgba(34,197,94,.12)')+';color:'+(isMissed?'var(--warning)':r.status==='late'?'var(--danger)':'var(--success)')+'">'+statusDisplay+'</span>'
         +resetBtn+editBtn
       +'</div>'
-      +'<div class="record-meta">'+(r.store||'')+' · '+(r.type||'')+' · '+(r.datetime?cleanDateTime(r.datetime):'--:--')+'<br>'
-        +(r.lat?('📍 '+Number(r.lat).toFixed(5)+', '+Number(r.lng).toFixed(5)+' ±'+(r.accuracy||'')+'m'):'')
-        +(isMissed?'<span style="color:#b45309;font-weight:700"> — Tap ⚠️ Fix to add checkout time</span>':'')
+      // Store + type + time — medium
+      +'<div style="font-size:12px;color:var(--text2);margin-top:3px;font-weight:500">'
+        +(r.store?'<span style="color:var(--text);font-weight:600">'+r.store+'</span> · ':'')
+        +'<span style="color:'+(isIn?'var(--success)':'var(--danger)')+'">'+typeLbl+'</span>'
+        +' · '+(r.datetime?'<b style="color:var(--text)">'+fmtTimeUTC8(r.datetime)+'</b>':'--:--')
       +'</div>'
-      +(r.remark?'<div style="font-size:12px;color:var(--accent);margin-top:2px">'+r.remark+'</div>':'')
+      // GPS — small, muted
+      +(r.lat?'<div style="font-size:10px;color:var(--text3);margin-top:2px">📍 '+Number(r.lat).toFixed(5)+', '+Number(r.lng).toFixed(5)+' ±'+(r.accuracy||'')+'m</div>':'')
+      +(isMissed?'<div style="font-size:11px;color:var(--warning);margin-top:3px;font-weight:600">Tap ⚠️ Fix to add checkout</div>':'')
+      +(r.remark?'<div style="font-size:11px;color:var(--accent2);margin-top:2px">'+r.remark+'</div>':'')
     +'</div>'
   +'</div>';
 }
