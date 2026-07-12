@@ -291,6 +291,52 @@
   .progress-bar-wrap { background:var(--border); border-radius:99px; overflow:hidden; }
   .progress-bar-fill { height:100%; border-radius:99px; transition:width .5s ease; }
 
+  /* ── 3-column ops grid (Present / Absent / Approval) ── */
+  .ops-grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
+
+  /* ── Daily trend bar chart ── */
+  .bar-chart {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    height: 120px;
+    padding: 8px 0 0;
+  }
+  .bar-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    height: 100%;
+    gap: 4px;
+  }
+  .bar-val {
+    font-size: 9px;
+    font-weight: 800;
+    color: var(--primary);
+    min-height: 13px;
+    line-height: 1;
+    text-align: center;
+  }
+  .bar-fill {
+    width: 100%;
+    border-radius: 6px 6px 2px 2px;
+    min-height: 4px;
+    transition: height .4s ease;
+  }
+  .bar-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text2);
+    margin-top: 4px;
+  }
+  .bar-date {
+    font-size: 9px;
+    color: var(--text2);
+    font-weight: 500;
+  }
+
   /* ── Store chips in admin ── */
   .store-chip { display:inline-flex; align-items:center; gap:4px; padding:4px 10px; border-radius:20px; font-size:12px; font-weight:700; }
   .store-chip.done { background:#d1fae5; color:#065f46; }
@@ -3537,17 +3583,19 @@ function renderSummaryTab() {
 
     <!-- 7-DAY TREND -->
     <div class="card">
-      <div class="card-title">📈 ${t('daily')}${summaryStoreFilter!=='all'?' — '+summaryStoreFilter:''}</div>
+      <div class="card-title" style="margin-bottom:14px">📈 ${t('daily')}${summaryStoreFilter!=='all'?' — '+summaryStoreFilter:''}</div>
       <div class="bar-chart">
-        ${days.map(d=>`
-          <div class="bar-col">
-            <div style="font-size:9px;color:var(--primary);font-weight:800;min-height:14px;display:flex;align-items:flex-end;justify-content:center">
-              ${d.val>0?(d.val>=1000?(d.val/1000).toFixed(1)+'k':d.val.toFixed(0)):''}
-            </div>
-            <div class="bar-fill" style="height:${Math.max(4,(d.val/maxDay)*70)}px;background:${d.dk===todayKey?'linear-gradient(180deg,#10b981,#059669)':'linear-gradient(180deg,#3b82f6,#1d4ed8)'}"></div>
+        ${days.map(d=>{
+          var h=maxDay>0?Math.max(4,Math.round((d.val/maxDay)*88)):4;
+          var isToday=d.dk===todayKey;
+          var valStr=d.val>0?(d.val>=1000?(d.val/1000).toFixed(1)+'k':Math.round(d.val)+''):'';
+          return `<div class="bar-col">
+            <div class="bar-val">${valStr}</div>
+            <div class="bar-fill" style="height:${h}px;background:${isToday?'linear-gradient(180deg,#10b981,#059669)':'linear-gradient(180deg,#60a5fa,#1d4ed8)'}"></div>
             <div class="bar-label">${d.lbl}</div>
-            <div style="font-size:9px;color:var(--text2);font-weight:600;margin-top:1px">${d.dateNum}</div>
-          </div>`).join('')}
+            <div class="bar-date">${d.dateNum}</div>
+          </div>`;
+        }).join('')}
       </div>
     </div>
 
