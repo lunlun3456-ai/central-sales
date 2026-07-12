@@ -5062,126 +5062,136 @@ async function fetchApprovalsForAdmin(){
 }
 var _adminRendering=false;
 async function renderAdminTab() {
-  if(_adminRendering) return; // prevent re-entrant calls
+  if(_adminRendering) return;
   _adminRendering=true;
   try{
-  var ZH=lang==='zh'; var EN=lang==='en';
-  // Permission-driven, not a hardcoded role list — Supervisor has
-  // view_admin=1 by default and must be able to see/approve requests
-  // for their own store.
-  const isAdmin=hasPerm('view_admin');
-  if(!isAdmin){
-    document.getElementById('tab-admin').innerHTML=`<div class="card" style="text-align:center;padding:40px">${ZH?'无权限':'No access'}</div>`;
-    return;
-  }
-  // Guard against overlapping renders racing and clobbering each other's data
-  var _myRenderId=++_adminRenderSeq;
-  document.getElementById('tab-admin').innerHTML=`<div class="spinner-wrap"><div class="spin"></div>Loading...</div>`;
-  // Fetch users + attendance together — whichever render started LAST wins
-  await Promise.all([fetchLiveUsers(true), fetchAttendanceForAdmin(), fetchApprovalsForAdmin()]);
-  // If a newer render began while we were fetching, abandon this stale one
-  if(_myRenderId!==_adminRenderSeq) return;
-  const allUsers=cachedUsers;
-  const pending=[]; const active=[]; const resigned=[];
-  // Filter users by company for display
-  // Admin sees a company filter; others see only their own company
-  var _userCompanyFilter=window._userCompanyFilter||_activeCompany||'all';
-  if(currentUser.role!=='admin') _userCompanyFilter=_activeCompany||currentUser.homeCompany||'';
-  window._userCompanyFilter=_userCompanyFilter;
+    var ZH=lang==='zh'; var EN=lang==='en';
+    const isAdmin=hasPerm('view_admin');
+    if(!isAdmin){
+      document.getElementById('tab-admin').innerHTML=`<div class="card" style="text-align:center;padding:40px">${ZH?'无权限':'No access'}</div>`;
+      _adminRendering=false; return;
+    }
+    var _myRenderId=++_adminRenderSeq;
+    document.getElementById('tab-admin').innerHTML=`<div class="spinner-wrap"><div class="spin"></div>${EN?'Loading...':'加载中...'}</div>`;
+    await Promise.all([fetchLiveUsers(true), fetchAttendanceForAdmin(), fetchApprovalsForAdmin()]);
+    if(_myRenderId!==_adminRenderSeq){ _adminRendering=false; return; }
 
-  Object.entries(allUsers).forEach(function(entry){
-    var uname=entry[0]; var u=entry[1];
-    var s=String(u.status||'active').toLowerCase();
-    // Company filter
-    var uCo=String(u.company||u.homeCompany||'');
-    var matchCo=_userCompanyFilter==='all'||!_userCompanyFilter||uCo===_userCompanyFilter||uCo==='all';
-    if(!matchCo) return;
-    var obj=Object.assign({},u,{username:uname});
-    if(s==='pending')  pending.push(obj);
-    else if(s==='resigned'||s==='inactive'||s==='disabled') resigned.push(obj);
-    else               active.push(obj);
-  });
-  const pendingHtml=pending.length>0?`
-    <div class="pending-card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-        <div class="card-title" style="color:#92400e;margin:0">🆕 ${'Pending Registrations'} <span class="pending-badge">${pending.length}</span></div>
-        <button class="btn refresh-inline" onclick="renderAdminTab()">🔄</button>
-      </div>
-      ${pending.map(u=>`
-        <div class="user-row"><div class="user-avatar pending-av">${(u.name||u.username||'?')[0].toUpperCase()}</div><div class="user-info"><div class="user-name">@${u.username}</div><div class="user-meta">${u.name||''} - ${u.store||''} - ${u.phone||'N/A'} - ${u.role||'staff'}</div></div><div class="user-actions"><button class="btn-sm approve" onclick="approveUser('${u.username}')">${t('approveBtn')}</button><button class="btn-sm reject" onclick="rejectUser('${u.username}')">${t('rejectBtn')}</button></div></div>`).join('')}
-    </div>`:`<div class="card" style="background:#f0fdf4;border:1.5px solid #bbf7d0;margin-bottom:14px"><div style="text-align:center;color:#166534;font-size:14px;font-weight:700;padding:6px">${t('noRequests')}</div></div>`;
-  const activeHtml=active.map(u=>`
-    <div class="user-row">
-      <div class="user-avatar">${(u.name||u.username||'?')[0].toUpperCase()}</div>
-      <div class="user-info">
-        <div class="user-name">${u.name||u.username} <span class="role-tag ${u.role||'staff'}">${t(u.role||'staff')}</span></div>
-        <div class="user-meta">@${u.username} · ${u.store||''} · ${u.phone||'N/A'}</div>
-      </div>
-      <div class="user-actions">
-        <button class="btn-sm edit" onclick="openEditUser('${u.username}')">${t('editUser')}</button>
-        <button class="btn-sm" style="background:#fef3c7;color:#92400e;font-size:10px" onclick="adminClearDeviceBind('${u.username}')">📱 Reset</button>
-        ${u.username!=='admin'?`
-        <button class="btn-sm" style="background:#fff7ed;color:#c2410c;font-size:10px;border:1.5px solid #fed7aa" onclick="resignUser('${u.username}','${(u.name||u.username).replace(/'/g,"\\'")}')">🚪 Resign</button>
-        <button class="btn-sm del" onclick="deleteUser('${u.username}')">${t('deleteUser')}</button>`:''}
-      </div>
-    </div>`).join('');
+    const allUsers=cachedUsers;
+    const pending=[]; const active=[]; const resigned=[];
+    var _userCompanyFilter=window._userCompanyFilter||_activeCompany||'all';
+    if(currentUser.role!=='admin') _userCompanyFilter=_activeCompany||currentUser.homeCompany||'';
+    window._userCompanyFilter=_userCompanyFilter;
 
-  // Resigned staff section — already populated in forEach above
-  const resignedHtml=resigned.length>0?`
-    <div style="margin-top:16px">
-      <details>
-        <summary style="font-size:14px;font-weight:800;color:#92400e;cursor:pointer;padding:10px 0;list-style:none;display:flex;align-items:center;gap:8px">
-          <span style="font-size:18px">🚪</span>
-          ${lang==='en'?'Resigned Staff':'Pekerja Berhenti'} (${resigned.length})
-          <span style="font-size:11px;color:#94a3b8;font-weight:600;margin-left:4px">${lang==='en'?'tap to expand':'ketik untuk buka'}</span>
-        </summary>
-        <div class="card" style="margin-top:8px;border:1.5px solid #fed7aa;background:#fff7ed">
-          ${resigned.map(u=>`
-            <div class="user-row" style="opacity:0.75">
-              <div class="user-avatar" style="background:#94a3b8">${(u.name||u.username||'?')[0].toUpperCase()}</div>
-              <div class="user-info">
-                <div class="user-name">${u.name||u.username}
-                  <span style="font-size:10px;background:#fee2e2;color:#b91c1c;border-radius:20px;padding:2px 8px;font-weight:700;margin-left:4px">🚪 ${lang==='en'?'Resigned':'Berhenti'}</span>
-                </div>
-                <div class="user-meta">@${u.username} · ${u.store||''} · ${u.phone||'N/A'}</div>
-              </div>
-              <div class="user-actions">
-                <button class="btn-sm" style="background:#d1fae5;color:#065f46;font-size:10px;border:1.5px solid #6ee7b7" onclick="rehireUser('${u.username}','${(u.name||u.username).replace(/'/g,"\\'")}')">✅ ${lang==='en'?'Re-hire':'Ambil Balik'}</button>
-                <button class="btn-sm del" onclick="deleteUser('${u.username}')">${t('deleteUser')}</button>
-              </div>
-            </div>`).join('')}
+    Object.entries(allUsers).forEach(function(entry){
+      var uname=entry[0]; var u=entry[1];
+      var s=String(u.status||'active').toLowerCase();
+      var uCo=String(u.company||u.homeCompany||'');
+      var matchCo=_userCompanyFilter==='all'||!_userCompanyFilter||uCo===_userCompanyFilter||uCo==='all';
+      if(!matchCo) return;
+      var obj=Object.assign({},u,{username:uname});
+      if(s==='pending')  pending.push(obj);
+      else if(s==='resigned'||s==='inactive'||s==='disabled') resigned.push(obj);
+      else               active.push(obj);
+    });
+
+    const pendingHtml=pending.length>0?`
+      <div class="pending-card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <div class="card-title" style="color:#92400e;margin:0">🆕 ${EN?'Pending Registrations':'Pendaftaran Tertunda'} <span class="pending-badge">${pending.length}</span></div>
+          <button class="btn refresh-inline" onclick="renderAdminTab()">🔄</button>
         </div>
-      </details>
-    </div>`:'';
+        ${pending.map(u=>`
+          <div class="user-row"><div class="user-avatar pending-av">${(u.name||u.username||'?')[0].toUpperCase()}</div>
+          <div class="user-info"><div class="user-name">@${u.username}</div>
+          <div class="user-meta">${u.name||''} · ${u.store||''} · ${u.company||''} · ${u.phone||'N/A'}</div></div>
+          <div class="user-actions">
+            <button class="btn-sm approve" onclick="approveUser('${u.username}')">${t('approveBtn')}</button>
+            <button class="btn-sm reject" onclick="rejectUser('${u.username}')">${t('rejectBtn')}</button>
+          </div></div>`).join('')}
+      </div>`:`<div class="card" style="background:#f0fdf4;border:1.5px solid #bbf7d0;margin-bottom:14px"><div style="text-align:center;color:#166534;font-size:14px;font-weight:700;padding:6px">${t('noRequests')}</div></div>`;
 
-  document.getElementById('tab-admin').innerHTML=`
-    <div class="card-header-flex" style="margin-bottom:14px"><h2 style="font-size:18px;font-weight:900">${t('adminTab')}</h2><button class="btn refresh-inline" onclick="renderAdminTab()">${t('refresh')}</button></div>
-    ${renderOperationsDashboard()}
-    ${canManageUsers()?pendingHtml:''}
-    ${canManageUsers()?`
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
-        <div style="font-size:15px;font-weight:800">${t('userMgmt')}</div>
-        <button class="btn refresh-inline" onclick="openAddUser()" style="background:var(--success);color:#fff;border:none">${t('addUser')}</button>
+    const activeHtml=active.map(u=>`
+      <div class="user-row">
+        <div class="user-avatar">${(u.name||u.username||'?')[0].toUpperCase()}</div>
+        <div class="user-info">
+          <div class="user-name">${u.name||u.username} <span class="role-tag ${u.role||'staff'}">${t(u.role||'staff')}</span>
+          ${u.company?`<span style="font-size:9px;background:#eff6ff;color:#1e3a8a;border-radius:10px;padding:1px 6px;margin-left:4px">${u.company}</span>`:''}
+          </div>
+          <div class="user-meta">@${u.username} · ${u.store||''} · ${u.phone||'N/A'}</div>
+        </div>
+        <div class="user-actions">
+          <button class="btn-sm edit" onclick="openEditUser('${u.username}')">${t('editUser')}</button>
+          <button class="btn-sm" style="background:#fef3c7;color:#92400e;font-size:10px" onclick="adminClearDeviceBind('${u.username}')">📱</button>
+          ${u.username!=='admin'?`
+          <button class="btn-sm" style="background:#fff7ed;color:#c2410c;font-size:10px;border:1.5px solid #fed7aa" onclick="resignUser('${u.username}','${(u.name||u.username).replace(/'/g,"\\'")}')">🚪</button>
+          <button class="btn-sm del" onclick="deleteUser('${u.username}')">${t('deleteUser')}</button>`:''}
+        </div>
+      </div>`).join('');
+
+    const resignedHtml=resigned.length>0?`
+      <div style="margin-top:16px">
+        <details>
+          <summary style="font-size:14px;font-weight:800;color:#92400e;cursor:pointer;padding:10px 0;list-style:none;display:flex;align-items:center;gap:8px">
+            <span>🚪</span> ${EN?'Resigned Staff':'Pekerja Berhenti'} (${resigned.length})
+            <span style="font-size:11px;color:#94a3b8">${EN?'tap to expand':'ketik untuk buka'}</span>
+          </summary>
+          <div class="card" style="margin-top:8px;border:1.5px solid #fed7aa;background:#fff7ed">
+            ${resigned.map(u=>`
+              <div class="user-row" style="opacity:0.75">
+                <div class="user-avatar" style="background:#94a3b8">${(u.name||u.username||'?')[0].toUpperCase()}</div>
+                <div class="user-info">
+                  <div class="user-name">${u.name||u.username}
+                    <span style="font-size:10px;background:#fee2e2;color:#b91c1c;border-radius:20px;padding:2px 8px;font-weight:700;margin-left:4px">🚪 ${EN?'Resigned':'Berhenti'}</span>
+                  </div>
+                  <div class="user-meta">@${u.username} · ${u.store||''} · ${u.company||''}</div>
+                </div>
+                <div class="user-actions">
+                  <button class="btn-sm" style="background:#d1fae5;color:#065f46;font-size:10px;border:1.5px solid #6ee7b7" onclick="rehireUser('${u.username}','${(u.name||u.username).replace(/'/g,"\\'")}')">✅ ${EN?'Re-hire':'Ambil Balik'}</button>
+                  <button class="btn-sm del" onclick="deleteUser('${u.username}')">${t('deleteUser')}</button>
+                </div>
+              </div>`).join('')}
+          </div>
+        </details>
+      </div>`:'';
+
+    // Build branches and users for zone/schedule tools
+    var branches=getAdminStores();
+    var users=active.map(function(u){return u.username;});
+
+    document.getElementById('tab-admin').innerHTML=`
+      <div class="card-header-flex" style="margin-bottom:14px">
+        <h2 style="font-size:18px;font-weight:900">${t('adminTab')}</h2>
+        <button class="btn refresh-inline" onclick="renderAdminTab()">${t('refresh')}</button>
       </div>
-      ${currentUser.role==='admin'?`
-      <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px">
-        <button onclick="window._userCompanyFilter='all';renderAdminTab()" style="padding:5px 10px;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;border:1.5px solid ${(_userCompanyFilter==='all')?'#1e3a8a':'var(--border)'};background:${(_userCompanyFilter==='all')?'#1e3a8a':'#f8fafc'};color:${(_userCompanyFilter==='all')?'#fff':'#334155'}">All</button>
-        ${ALL_COMPANIES.map(co=>`<button onclick="window._userCompanyFilter='${co.replace(/'/g,"\\'")}';renderAdminTab()" style="padding:5px 10px;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;border:1.5px solid ${(_userCompanyFilter===co)?'#1e3a8a':'var(--border)'};background:${(_userCompanyFilter===co)?'#1e3a8a':'#f8fafc'};color:${(_userCompanyFilter===co)?'#fff':'#334155'}">${co}</button>`).join('')}
-      </div>`:''}
-      <div class="card">${activeHtml||`<div class="empty-state"><p>No active users</p></div>`}</div>
-      ${resignedHtml}
-    `:''}
-    ${hasPerm('role_perm')?'<div id="perms-panel" style="margin-top:8px"></div>':''}
-    ${hasPerm('monthly_report')?'<div id="monthly-report-panel"></div>':''}
-    <div id="zone-schedule-panel">${renderZoneScheduleTools(branches,users)}</div>`;
-  if(hasPerm('role_perm')) renderPermissionsPanel();
-  if(hasPerm('monthly_report')) renderMonthlyReportPanel();
-  // Sync zones+schedules from ALL companies in background (no re-render loop)
-  if(currentUser.role==='admin'&&(hasPerm('work_zone')||hasPerm('work_schedule'))){
-    setTimeout(function(){syncAllCompanyZonesAndSchedules().catch(function(){});},1000);
+      ${renderOperationsDashboard()}
+      ${canManageUsers()?pendingHtml:''}
+      ${canManageUsers()?`
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+          <div style="font-size:15px;font-weight:800">${t('userMgmt')}</div>
+          <button class="btn refresh-inline" onclick="openAddUser()" style="background:var(--success);color:#fff;border:none">${t('addUser')}</button>
+        </div>
+        ${currentUser.role==='admin'?`
+        <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px">
+          <button onclick="window._userCompanyFilter='all';renderAdminTab()" style="padding:5px 10px;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;border:1.5px solid ${_userCompanyFilter==='all'?'#1e3a8a':'var(--border)'};background:${_userCompanyFilter==='all'?'#1e3a8a':'#f8fafc'};color:${_userCompanyFilter==='all'?'#fff':'#334155'}">All</button>
+          ${ALL_COMPANIES.map(co=>`<button onclick="window._userCompanyFilter='${co.replace(/'/g,"\\'")}';renderAdminTab()" style="padding:5px 10px;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;border:1.5px solid ${_userCompanyFilter===co?'#1e3a8a':'var(--border)'};background:${_userCompanyFilter===co?'#1e3a8a':'#f8fafc'};color:${_userCompanyFilter===co?'#fff':'#334155'}">${co}</button>`).join('')}
+        </div>`:''}
+        <div class="card">${activeHtml||`<div class="empty-state"><p>${t('noActiveUsers')}</p></div>`}</div>
+        ${resignedHtml}
+      `:''}
+      ${hasPerm('role_perm')?'<div id="perms-panel" style="margin-top:8px"></div>':''}
+      ${hasPerm('monthly_report')?'<div id="monthly-report-panel"></div>':''}
+      <div id="zone-schedule-panel">${renderZoneScheduleTools(branches,users)}</div>`;
+
+    if(hasPerm('role_perm')) renderPermissionsPanel();
+    if(hasPerm('monthly_report')) renderMonthlyReportPanel();
+    if(currentUser.role==='admin'&&(hasPerm('work_zone')||hasPerm('work_schedule'))){
+      setTimeout(function(){syncAllCompanyZonesAndSchedules().catch(function(){});},1500);
+    }
+  }catch(err){
+    document.getElementById('tab-admin').innerHTML=`<div class="card" style="color:#dc2626;padding:20px">Admin tab error: ${err.message}</div>`;
+  }finally{
+    _adminRendering=false;
   }
-  }catch(e){ console.warn('renderAdminTab error:',e); }
-  finally{ _adminRendering=false; }
 }
 async function approveUser(username) {
   showToast(lang==='zh'?'正在审批...':'Approving...','pending');
