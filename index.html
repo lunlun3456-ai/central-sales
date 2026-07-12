@@ -997,7 +997,11 @@ async function syncAllCompanyZonesAndSchedules(){
   }));
   if(allZones.length)  saveWorkZones(allZones);
   if(allScheds.length) saveWorkSchedules(allScheds);
-  renderAdminTab();
+  // Re-render only the zone/schedule section, not the whole admin tab
+  if(currentTab==='admin'){
+    var zPanel=document.getElementById('zone-schedule-panel');
+    if(zPanel) zPanel.innerHTML=renderZoneScheduleTools(getAdminStores(),[]);
+  }
 }
 
 function saveWorkZones(arr){ cachedWorkZones = arr || []; saveData('work_zones', cachedWorkZones); }
@@ -2583,26 +2587,40 @@ async function triggerSyncRefresh() {
 }
 
 async function fetchLiveUsers(forceRefresh) {
-  if(!WEB_APP_URL||WEB_APP_URL.includes("PASTE_YOUR")) return {};
-  try {
-    const users = await gasGet('getUsers');
-    if(users && typeof users==='object' && !Array.isArray(users) && Object.keys(users).length>0){
-      cachedUsers = users;
-      saveData('cached_users', users);
-    }
-  } catch(e){
-    const cached = loadData('cached_users', {});
-    if(Object.keys(cached).length > 0) cachedUsers = cached;
+  // Users live in Central DB — fetch from Central GAS
+  var centralUrl=(CENTRAL_GAS_URL&&!CENTRAL_GAS_URL.includes('PASTE_'))?CENTRAL_GAS_URL:'';
+  if(centralUrl){
+    try{
+      var resp=await fetch(centralUrl+'?action=getUsers&t='+Date.now(),{method:'GET',cache:'no-cache'});
+      var data=await resp.json();
+      if(data&&Array.isArray(data.users)){
+        // Convert array to keyed object by username
+        var userMap={};
+        data.users.forEach(function(u){
+          if(u.username) userMap[u.username.toLowerCase()]=u;
+        });
+        if(Object.keys(userMap).length>0){
+          cachedUsers=userMap;
+          saveData('cached_users',userMap);
+        }
+      }
+    }catch(e){ console.warn('Central users fetch failed:',e.message); }
   }
-  // Always pull latest role permissions from server (critical — staff devices
-  // must reflect admin-set permissions, not stale local defaults)
-  try {
-    const permResp = await gasGet('getPermissions');
-    if(permResp && permResp.permissions){
-      savePerms(permResp.permissions);
-      if(currentUser) applyPermissionsToNav();
-    }
-  } catch(e){ console.warn('permission sync failed:', e.message); }
+  // Also fetch from company GAS for company-specific data (permissions etc)
+  if(WEB_APP_URL&&!WEB_APP_URL.includes('PASTE_')&&WEB_APP_URL.length>20){
+    try{
+      const permResp=await gasGet('getPermissions');
+      if(permResp&&permResp.permissions){
+        savePerms(permResp.permissions);
+        if(currentUser) applyPermissionsToNav();
+      }
+    }catch(e){}
+  }
+  // Fall back to localStorage cache
+  if(Object.keys(cachedUsers).length===0){
+    var cached=loadData('cached_users',{});
+    if(Object.keys(cached).length>0) cachedUsers=cached;
+  }
   return cachedUsers;
 }
 
@@ -2678,17 +2696,19 @@ async function doLogin(){
     var companies=cr.allowedCompanies||[];
     var companyMap=cr.companies||{};
     if(companies.length===0){showToast('No companies assigned. Contact Admin.','error');return;}
-    if(companies.length===1){
-      _activeCompany=companies[0];
-      WEB_APP_URL=String(companyMap[companies[0]]||'').indexOf('PASTE_')>=0?'':String(companyMap[companies[0]]||'');
-      localStorage.setItem('active_company',_activeCompany);
+
+    // Admin always enters app directly — no company selector
+    // Admin can switch company from inside the app (Me tab)
+    // For all other roles: if only 1 company → enter directly, else show selector
+    if(cr.role==='admin'||companies.length===1){
+      // Use last selected company if available, else first company
+      var lastUsed=localStorage.getItem('active_company')||'';
+      var pick=companies.indexOf(lastUsed)>=0?lastUsed:companies[0];
+      _activeCompany=pick;
+      WEB_APP_URL=String(companyMap[pick]||'').indexOf('PASTE_')>=0?'':String(companyMap[pick]||'');
+      localStorage.setItem('active_company',pick);
       _enterApp(cr,pin);return;
     }
-    var lastUsed=localStorage.getItem('active_company')||'';
-    var pick=companies.indexOf(lastUsed)>=0?lastUsed:companies[0];
-    _activeCompany=pick;
-    WEB_APP_URL=String(companyMap[pick]||'').indexOf('PASTE_')>=0?'':String(companyMap[pick]||'');
-    localStorage.setItem('active_company',pick);
     if(loginBtn) loginBtn.style.display='none';
     var selEl=document.getElementById('login-company-select');
     selEl.innerHTML='';
@@ -4713,7 +4733,7 @@ function renderOperationsDashboard(){
         : `<div style="font-size:13px;color:var(--text2);padding:10px 0">${ZH?'该日期/门店暂无出勤记录。点击🔄同步加载。':'No attendance records for this date/store. Tap 🔄 Sync to load.'}</div>`}
     </div>
 
-    ${renderZoneScheduleTools(branches,users)}
+    <div id="zone-schedule-panel">${renderZoneScheduleTools(branches,users)}</div>
     ${hasPerm('db_backup')?`<button class="btn secondary" style="margin-top:12px" onclick="createDatabaseBackup()">${ZH?'创建数据库备份':'Create Database Backup'}</button>`:''}
   </div>`;
 }
@@ -4878,7 +4898,9 @@ async function saveWorkZoneFromForm(){
       .then(function(r){return r.json();})
       .then(function(d){
         if(d.workZones) saveWorkZones(d.workZones);
-        renderAdminTab();
+        // Re-render just the zone/schedule section
+        var zp=document.getElementById('zone-schedule-panel');
+        if(zp) zp.innerHTML=renderZoneScheduleTools(getAdminStores(),[]);
       }).catch(function(){});
   },2000);
 }
@@ -4923,7 +4945,8 @@ async function saveWorkScheduleFromForm(){
       .then(function(r){return r.json();})
       .then(function(d){
         if(d.workSchedules) saveWorkSchedules(d.workSchedules);
-        renderAdminTab();
+        var zp=document.getElementById('zone-schedule-panel');
+        if(zp) zp.innerHTML=renderZoneScheduleTools(getAdminStores(),[]);
       }).catch(function(){});
   },2000);
 }
