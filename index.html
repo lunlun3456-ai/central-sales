@@ -2520,68 +2520,112 @@ function shareMonthlyWhatsApp(month){
 }
 
 async function triggerSyncRefresh() {
-  if(!WEB_APP_URL||WEB_APP_URL.includes("PASTE_YOUR")){showToast('No URL configured','error');return;}
   const btn=document.getElementById('sync-btn');
   if(btn) btn.textContent='⏳';
   showToast(lang==='zh'?'正在从云端同步...':'Syncing from Cloud...','pending');
-  try {
-    const json = await gasGet('getSales');
-    let newSales = null;
-    if(json&&json.sales&&Array.isArray(json.sales))      newSales = json.sales;
-    else if(Array.isArray(json))                          newSales = json;
 
-    if(newSales !== null) {
+  // For admin: fetch from ALL company GAS endpoints and merge data
+  var companies=(_centralUser&&_centralUser.companies)||{};
+  var companyNames=Object.keys(companies);
+  var isAdminRole=(currentUser&&currentUser.role==='admin');
+
+  if(isAdminRole&&companyNames.length>0){
+    try{
+      var allSales=[], allAtt=[], allSettlements=[], allLocks=[], allApprovals=[];
+      var allZones=[], allScheds=[], allBackups=[];
+
+      await Promise.all(companyNames.map(async function(co){
+        var url=companies[co]||'';
+        if(!url||url.includes('PASTE_')) return;
+        try{
+          // Fetch sales
+          var r1=await fetch(url+'?action=getSales&t='+Date.now(),{method:'GET',cache:'no-cache'});
+          var d1=await r1.json();
+          var sales=Array.isArray(d1)?d1:(d1&&Array.isArray(d1.sales)?d1.sales:[]);
+          sales.forEach(function(s){s._company=co; allSales.push(s);});
+        }catch(e){}
+        try{
+          // Fetch all app data
+          var r2=await fetch(url+'?action=getAppData&t='+Date.now(),{method:'GET',cache:'no-cache'});
+          var d2=await r2.json();
+          if(d2){
+            if(Array.isArray(d2.attendance))       d2.attendance.forEach(function(a){a._company=co;allAtt.push(a);});
+            if(Array.isArray(d2.settlements))       d2.settlements.forEach(function(s){s._company=co;allSettlements.push(s);});
+            if(Array.isArray(d2.settlementLocks))   d2.settlementLocks.forEach(function(l){l._company=co;allLocks.push(l);});
+            if(Array.isArray(d2.approvals))         d2.approvals.forEach(function(a){a._company=co;allApprovals.push(a);});
+            if(Array.isArray(d2.workZones))         d2.workZones.forEach(function(z){z._company=co;allZones.push(z);});
+            if(Array.isArray(d2.workSchedules))     d2.workSchedules.forEach(function(s){s._company=co;allScheds.push(s);});
+            if(Array.isArray(d2.backups))           d2.backups.forEach(function(b){b._company=co;allBackups.push(b);});
+            if(d2.rolePermissions&&typeof d2.rolePermissions==='object') savePerms(d2.rolePermissions);
+            if(d2.storePermissions&&typeof d2.storePermissions==='object') saveStorePerms(d2.storePermissions);
+          }
+        }catch(e){}
+      }));
+
+      // Save merged data
+      if(allSales.length>0) saveSales(allSales);
+      if(allAtt.length>0){ _serverAtt=allAtt; _serverAttLoaded=true; saveData('attendance_records',[]); }
+      if(allSettlements.length>0) saveSettlementsData(allSettlements);
+      if(allLocks.length>0) saveSettlementLocks(allLocks);
+      if(allApprovals.length>0) saveApprovals(allApprovals);
+      if(allZones.length>0) saveWorkZones(allZones);
+      if(allScheds.length>0) saveWorkSchedules(allScheds);
+      if(allBackups.length>0) saveBackups(allBackups);
+
+      applyPermissionsToNav();
+      renderCurrentTab();
+      checkAllStoresSubmitted();
+      showToast(lang==='zh'?'全公司同步完成 ✓':'All companies synced ✓','success');
+    }catch(e){
+      showToast('Sync error: '+e.message.slice(0,60),'error');
+    }
+    if(btn) btn.textContent='🔄';
+    return;
+  }
+
+  // Non-admin: sync from active company only (original behaviour)
+  var url=gasUrlFor(_activeCompany)||WEB_APP_URL;
+  if(!url||url.length<20){showToast('No GAS URL configured','error');if(btn)btn.textContent='🔄';return;}
+  try {
+    var resp=await fetch(url+'?action=getSales&t='+Date.now(),{method:'GET',cache:'no-cache'});
+    var json=await resp.json();
+    var newSales=null;
+    if(json&&json.sales&&Array.isArray(json.sales))  newSales=json.sales;
+    else if(Array.isArray(json))                      newSales=json;
+
+    if(newSales!==null){
       saveSales(newSales);
-      // Always re-render whichever tab is showing AND force records+summary refresh
       renderCurrentTab();
       checkAllStoresSubmitted();
       showToast(lang==='zh'?'云端同步成功 ✓':'Synced from Cloud ✓','success');
-      // Also pull cash drawer records
-      try {
-        const cdJson = await gasGet('getCashDrawer');
-        if(cdJson && Array.isArray(cdJson.cashDrawer)) saveCashDrawer(cdJson.cashDrawer);
-        if(cdJson && Array.isArray(cdJson.movements)) saveCashMovements(cdJson.movements);
-      } catch(e2){ console.warn('CashDrawer sync skipped:', e2.message); }
-      try {
-        const appJson = await gasGet('getAppData');
+      try{
+        var r2=await fetch(url+'?action=getAppData&t='+Date.now(),{method:'GET',cache:'no-cache'});
+        var appJson=await r2.json();
         if(appJson){
           if(Array.isArray(appJson.settlementLocks)) saveSettlementLocks(appJson.settlementLocks);
-          if(Array.isArray(appJson.approvals)) saveApprovals(appJson.approvals);
-          // Sync settlement reports
-          if(Array.isArray(appJson.settlements)){
-            saveSettlementsData(appJson.settlements);
-          }
+          if(Array.isArray(appJson.approvals))       saveApprovals(appJson.approvals);
+          if(Array.isArray(appJson.settlements))     saveSettlementsData(appJson.settlements);
           if(Array.isArray(appJson.attendance)){
-            var serverIds=new Set(appJson.attendance.map(function(r){return String(r.id);}));
-            // Merge: server is authoritative; keep local records not yet on server
-            // Attendance: store in memory only (no localStorage)
-            _serverAtt = appJson.attendance;
-            _serverAttLoaded = true;
-            saveData('attendance_records', []); // wipe stale phone data
+            _serverAtt=appJson.attendance; _serverAttLoaded=true;
+            saveData('attendance_records',[]);
             if(currentTab==='attendance') renderAttendanceTab();
             if(currentTab==='admin') renderAdminTab();
           }
-          if(Array.isArray(appJson.workZones)) saveWorkZones(appJson.workZones);
+          if(Array.isArray(appJson.workZones))     saveWorkZones(appJson.workZones);
           if(Array.isArray(appJson.workSchedules)) saveWorkSchedules(appJson.workSchedules);
-          if(Array.isArray(appJson.backups)) saveBackups(appJson.backups);
-          if(Array.isArray(appJson.userDevices)) saveUserDevices(appJson.userDevices);
-          if(appJson.rolePermissions && typeof appJson.rolePermissions==='object') savePerms(appJson.rolePermissions);
-          if(appJson.storePermissions && typeof appJson.storePermissions==='object') saveStorePerms(appJson.storePermissions);
+          if(Array.isArray(appJson.backups))       saveBackups(appJson.backups);
+          if(appJson.rolePermissions) savePerms(appJson.rolePermissions);
+          if(appJson.storePermissions) saveStorePerms(appJson.storePermissions);
           applyPermissionsToNav();
         }
-      } catch(e3){ console.warn('App data sync skipped:', e3.message); }
-    } else if(json && !json.sales) {
-      // Server responded but no sales key — show what came back
+      }catch(e3){}
+    } else {
       saveSales([]);
       renderCurrentTab();
       showToast('No sales data on server yet','success');
-    } else {
-      console.error('Unexpected sync response:', JSON.stringify(json).slice(0,200));
-      showToast('Sync error — check GAS deployment (Anyone access)','error');
     }
-  } catch(e){
-    console.error('Sync error:', e.message);
-    showToast('Sync failed: ' + e.message.slice(0,60), 'error');
+  }catch(e){
+    showToast('Sync failed: '+e.message.slice(0,60),'error');
   }
   if(btn) btn.textContent='🔄';
 }
@@ -3280,22 +3324,6 @@ function renderRecordsTab() {
 // ============================================================
 // SUMMARY TAB
 // ============================================================
-// Switch company from Summary tab and re-sync sales data
-async function switchSummaryCompany(co){
-  if(co===_activeCompany) return;
-  setActiveCompany(co);
-  updateTopBar();
-  showToast('Loading '+co+' sales...','pending');
-  await triggerSyncRefresh();
-  renderSummaryTab();
-  // Also render all-company panel
-  if(hasPerm('view_all_companies')){
-    var acp=document.getElementById('all-company-panel');
-    if(acp){ renderAllCompanyPanel(); }
-    if(!_allCoFetched){ _allCoFetched=true; fetchAllCompanySales(); }
-  }
-}
-
 function renderSummaryTab() {
   const role    = currentUser.role;
   const isBoss  = role==='boss';
@@ -3372,21 +3400,6 @@ function renderSummaryTab() {
       <h2 style="font-size:18px;font-weight:900">${t('summaryTab')}</h2>
       <button class="btn refresh-inline" onclick="triggerSyncRefresh()">🔄 ${t('refresh')}</button>
     </div>
-
-    ${hasPerm('view_all_companies')&&_centralUser&&Object.keys(_centralUser.companies||{}).length>1?`
-    <div class="card" style="background:#eff6ff;border:2px solid #bfdbfe;margin-bottom:10px">
-      <div style="font-size:11px;font-weight:800;color:#1e3a8a;margin-bottom:8px">🏢 ${lang==='en'?'VIEWING COMPANY':'SYARIKAT AKTIF'}</div>
-      <div style="display:flex;gap:5px;flex-wrap:wrap">
-        ${Object.keys(_centralUser.companies).map(co=>`
-          <button onclick="switchSummaryCompany('${co.replace(/'/g,"\\'")}\")"
-            style="padding:6px 10px;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;
-              border:2px solid ${co===_activeCompany?'#1e3a8a':'var(--border)'};
-              background:${co===_activeCompany?'#1e3a8a':'#f8fafc'};
-              color:${co===_activeCompany?'#fff':'#334155'}">${co}</button>`).join('')}
-      </div>
-    </div>
-    ${hasPerm('view_all_companies')?'<div id="all-company-panel" style="margin-bottom:12px"></div>':''}
-    `:''}
 
     <!-- FILTER CARD -->
     <div class="card" style="padding:14px;background:#eff6ff;margin-bottom:12px">
@@ -3495,14 +3508,6 @@ function renderSummaryTab() {
         </div>`;
       }).join('')}
     </div>`;
-  // Render all-company panel in Summary tab
-  if(hasPerm('view_all_companies')){
-    var acp=document.getElementById('all-company-panel');
-    if(acp){
-      renderAllCompanyPanel();
-      if(!_allCoFetched){ _allCoFetched=true; fetchAllCompanySales(); }
-    }
-  }
 }
 function updateSummaryDateRange(val){summaryViewMode=val;renderSummaryTab();}
 function updateSummaryCustomDate(val){summaryCustDate=val;renderSummaryTab();}
