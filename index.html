@@ -795,6 +795,30 @@ ALL_COMPANIES.forEach(function(c){ COMPANY_STORES[c].forEach(function(s){ _allSt
 const STORES   = ['HQ'].concat(_allStores);
 const BRANCHES = _allStores.slice();
 
+// Look up which company owns a given store
+// e.g. getCompanyForStore('Bonia Sabindo') → 'IS LEATHER SDN. BHD.'
+// e.g. getCompanyForStore('KASIH SAYANG')  → 'KASIH SAYANG'
+function getCompanyForStore(store){
+  if(!store||store==='HQ') return _activeCompany||ALL_COMPANIES[0];
+  var found='';
+  ALL_COMPANIES.forEach(function(co){
+    if(COMPANY_STORES[co].indexOf(store)>=0) found=co;
+  });
+  return found||_activeCompany||ALL_COMPANIES[0];
+}
+
+// Get the correct GAS URL for a store (routes to the store's company GAS)
+function gasUrlForStore(store){
+  return gasUrlFor(getCompanyForStore(store));
+}
+
+// Smart URL: uses store if provided, else active company
+// Use this for all company GAS writes
+function smartGasUrl(store){
+  if(store&&store!=='HQ'&&store!=='all') return gasUrlForStore(store);
+  return smartGasUrl(currentUser&&currentUser.store);
+}
+
 // Admin helper — returns stores visible to current user
 // Only admin sees ALL stores across ALL companies
 // Boss/manager/supervisor/staff see only their active company's stores
@@ -892,7 +916,7 @@ function getDeviceName(){
 function recordLoginDevice(){
   if(!currentUser) return;
   if(!WEB_APP_URL||WEB_APP_URL.length<10) return; // no company GAS set yet
-  fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',headers:{'Content-Type':'text/plain'},body:JSON.stringify({
+  fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',headers:{'Content-Type':'text/plain'},body:JSON.stringify({
     action:'recordLogin',
     username:currentUser.username,
     name:currentUser.name,
@@ -1725,7 +1749,7 @@ function setStorePermState(btn){
     sp[store][role][feature] = state==='on' ? 1 : 0;
   }
   saveStorePerms(sp);
-  fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',
+  fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
     headers:{'Content-Type':'text/plain'},
     body:JSON.stringify({action:'saveStorePermissions',storePermissions:sp,savedBy:currentUser.name})}).catch(function(){});
   applyPermissionsToNav();
@@ -1741,7 +1765,7 @@ function clearStorePermOverrides(store, role){
     if(!Object.keys(sp[store]).length) delete sp[store];
   }
   saveStorePerms(sp);
-  fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',
+  fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
     headers:{'Content-Type':'text/plain'},
     body:JSON.stringify({action:'saveStorePermissions',storePermissions:sp,savedBy:currentUser.name})}).catch(function(){});
   applyPermissionsToNav();
@@ -1779,10 +1803,10 @@ function savePermissionsFromUI(){
   renderCurrentTab();
   // Sync global perms to GAS
   if(WEB_APP_URL&&WEB_APP_URL.length>20){
-    fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',
+    fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
       headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'savePermissions',permissions:p,savedBy:currentUser.name})}).catch(function(){});
-    fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',
+    fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
       headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'saveStorePermissions',storePermissions:sp,savedBy:currentUser.name})}).catch(function(){});
   }
@@ -1795,7 +1819,7 @@ function resetPermissionsToDefault(){
   if(!confirm(lang==='en'?'Reset all permissions to default?':'Reset semua kebenaran ke nilai asal?')) return;
   var dp=JSON.parse(JSON.stringify(DEFAULT_PERMS));
   savePerms(dp);
-  fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',
+  fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
     headers:{'Content-Type':'text/plain'},
     body:JSON.stringify({action:'savePermissions',permissions:dp,savedBy:currentUser.name})}).catch(function(){});
   applyPermissionsToNav();
@@ -2088,7 +2112,7 @@ async function sendMonthlyReport(month){
   saveReportSettings(s);
   try{
     var reportMonth=month||(function(){var _e=document.getElementById('report-month');return _e?_e.value:'';})()||dateKeyUTC8().slice(0,7);
-    await fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',
+    await fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
       headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'sendMonthlyReport',emails:s.emails,
         month:reportMonth,sentBy:currentUser.name,role:currentUser.role})});
@@ -2981,7 +3005,7 @@ function _staffSubmitForApproval(withUpload) {
     reason:'Staff sales submission',status:'pending',createdAt:nowUTC8(),
     payload:JSON.stringify({cash:p.cash,qr:p.qr,card:p.card,bank:p.bank,remark:p.remark})};
   const a=getApprovals(); a.push(req); saveApprovals(a);
-  fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',
+  fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
     headers:{'Content-Type':'text/plain'},
     body:JSON.stringify({action:'createApprovalRequest',...req})}).catch(()=>{});
   closeModal();
@@ -3016,23 +3040,37 @@ function confirmSubmit(withUpload=false) {
     submissionType,changeLog:JSON.stringify(changeLog)
   };
   showToast(lang==='zh'?'正在同步至云端...':'Uploading to Cloud...','pending');
-  var _submitUrl=gasUrlFor(_activeCompany)||WEB_APP_URL;
-  if(!_submitUrl||_submitUrl.length<20){showToast('No company GAS URL configured. Check Central DB Companies sheet.','error');return;}
+  // Route by STORE — KASIH SAYANG store goes to KASIH SAYANG GAS, not active company
+  var _submitCo=getCompanyForStore(record.store);
+  var _submitUrl=gasUrlFor(_submitCo);
+  if(!_submitUrl||_submitUrl.length<20){
+    showToast('\u274c No GAS URL for '+_submitCo+'. Set it in Central DB \u2192 Companies sheet.','error');
+    return;
+  }
+  // GAS requires no-cors + text/plain. Cannot read response — verify via GET after.
   fetch(_submitUrl,{
-    method:'POST',mode:'no-cors',cache:'no-cache',
+    method:'POST',
+    mode:'no-cors',
+    cache:'no-cache',
     headers:{'Content-Type':'text/plain'},
     body:JSON.stringify(Object.assign({action:'submitSales'},record))
-  }).then(()=>{
-    // Update local cache immediately so UI reflects change now
-    let sales=getSales().filter(item=>!(item.dateKey===s.targetDate&&item.store===s.store));
+  }).then(function(){
+    // Update local cache immediately
+    var sales=getSales().filter(function(item){return !(item.dateKey===s.targetDate&&item.store===s.store);});
     sales.push(record);
     saveSales(sales);
     closeModal();
     showToast(t('submitted'),'success');
     renderSubmitTab();
     checkAllStoresSubmitted();
-    setTimeout(()=>triggerSyncRefresh(),1500);
-  }).catch(err=>{showToast('Error: '+err,'error');});
+    // Verify saved in spreadsheet after 2.5s via GET
+    setTimeout(function(){
+      triggerSyncRefresh().then(function(){
+        var saved=getSales().find(function(r){return r.dateKey===s.targetDate&&r.store===s.store;});
+        if(!saved) showToast('\u26a0\ufe0f Sales may not have saved. Check GAS URL in Central DB Companies sheet.','error');
+      }).catch(function(){});
+    },2500);
+  }).catch(function(err){showToast('Submit error: '+err,'error');});
 }
 
 // ============================================================
@@ -4227,7 +4265,7 @@ async function submitAttendance(type){
       remark:remark,accuracy:loc.accuracy,gpsSource:loc.source,deviceId:getDeviceId(),deviceName:getDeviceName(),
       userAgent:navigator.userAgent||'',platform:navigator.platform||''
     };
-    gasPost(_activeCompany,Object.assign({action:'submitAttendance'},record))
+    gasPost(getCompanyForStore(record.store||currentUser.store),Object.assign({action:'submitAttendance'},record))
       .catch(function(){});
     var zone=nearestLocalZone(record.store,record.lat,record.lng);
     // iOS GPS can have 100-500m error — add accuracy as buffer to allowed radius
@@ -4272,7 +4310,7 @@ async function submitAttendance(type){
       remark:remark,accuracy:loc.accuracy,gpsSource:loc.source,deviceId:getDeviceId(),deviceName:getDeviceName(),
       userAgent:navigator.userAgent||'',platform:navigator.platform||''
     };
-    fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',
+    fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
       headers:{'Content-Type':'text/plain'},
       body:JSON.stringify(Object.assign({action:'submitAttendance'},errRecord))
     }).catch(function(){});
@@ -4346,7 +4384,7 @@ function showAttResetModal(username,dateKey,recordId,type,timeStr){
 function resetStaffAttendance(username,dateKey,recordId){
   _serverAtt=_serverAtt.map(function(r){return String(r.id)!==String(recordId)?r:Object.assign({},r,{status:'voided'});});
   _attSession=_attSession.filter(function(r){return String(r.id)!==String(recordId);});
-  fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',
+  fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
     headers:{'Content-Type':'text/plain'},
     body:JSON.stringify({action:'resetAttendance',recordId:recordId,username:username,dateKey:dateKey,
       resetBy:currentUser.name,resetRole:currentUser.role})}).catch(function(){});
@@ -4405,7 +4443,7 @@ function openFixCheckout(recordId, username, dateKey){
       editedAt:nowUTC8()
     };
 
-    fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',
+    fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
       headers:{'Content-Type':'text/plain'},
       body:JSON.stringify(newRecord)}).catch(function(){});
 
@@ -4470,7 +4508,7 @@ function doEditAttendance(recordId,username,dateKey,type,newTimeHHMM){
   _attSession.forEach(function(r){
     if(String(r.id)===String(recordId)){r.datetime=newDatetime;r.editedBy=currentUser.name;r.editedAt=nowUTC8();}
   });
-  gasPost(_activeCompany,{action:'editAttendanceTime',recordId:recordId,username:username,
+  gasPost(getCompanyForStore(currentUser.store),{action:'editAttendanceTime',recordId:recordId,username:username,
       dateKey:dateKey,type:type,newDatetime:newDatetime,
       editedBy:currentUser.name,editedRole:currentUser.role,editedAt:nowUTC8()}).catch(function(){});
   showToast(('Time updated: ')+username+' '+newTimeHHMM+' ✅','success');
@@ -4719,7 +4757,7 @@ async function bulkDecideApprovals(decision){
   for(var i=0;i<ids.length;i++){
     var id=ids[i];
     try{
-      await fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',
+      await fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
         headers:{'Content-Type':'text/plain'},
         body:JSON.stringify({action:decision==='approve'?'approveApprovalRequest':'rejectApprovalRequest',
           id:id,approver:currentUser.name,approverRole:currentUser.role,approverStore:currentUser.store})});
@@ -4783,7 +4821,7 @@ function renderZoneScheduleTools(branches,users){
     <button class="btn success" onclick="saveWorkScheduleFromForm()">Save Work Schedule</button>`;
   var schedSection2=hasPerm('work_schedule')?schedSection:'';
   return `<div class="divider"></div>${zoneSection}${schedSection2}`;}
-async function saveWorkZoneFromForm(){ const payload={action:'saveWorkZone',role:currentUser.role,updatedBy:currentUser.name,store:document.getElementById('zone-store').value,latitude:document.getElementById('zone-lat').value,longitude:document.getElementById('zone-lng').value,radiusMeters:document.getElementById('zone-radius').value,status:'active'}; if(!payload.latitude||!payload.longitude){showToast('Enter latitude and longitude.','error');return;} await fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},body:JSON.stringify(payload)}); showToast('Zone saved.','success'); triggerSyncRefresh(); }
+async function saveWorkZoneFromForm(){ const payload={action:'saveWorkZone',role:currentUser.role,updatedBy:currentUser.name,store:document.getElementById('zone-store').value,latitude:document.getElementById('zone-lat').value,longitude:document.getElementById('zone-lng').value,radiusMeters:document.getElementById('zone-radius').value,status:'active'}; if(!payload.latitude||!payload.longitude){showToast('Enter latitude and longitude.','error');return;} await fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},body:JSON.stringify(payload)}); showToast('Zone saved.','success'); triggerSyncRefresh(); }
 async function saveWorkScheduleFromForm(){
   var storeEl=document.getElementById('sched-store');
   var store=storeEl?storeEl.value:(currentUser.store||'');
@@ -4795,7 +4833,7 @@ async function saveWorkScheduleFromForm(){
   if(!start||!end){showToast(lang==='zh'?'请填写开始和结束时间':'Enter start and end time','error');return;}
   var staffUser=document.getElementById('sched-user').value;
   var saves=checkedDays.map(function(day){
-    return fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',
+    return fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',
       headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'saveWorkSchedule',role:currentUser.role,
         updatedBy:currentUser.name,username:staffUser,
@@ -4806,7 +4844,7 @@ async function saveWorkScheduleFromForm(){
   showToast((lang==='zh'?'排班已保存 ':'Schedule saved for ')+checkedDays.join(', ')+' ✅','success');
   triggerSyncRefresh();
 }
-async function createDatabaseBackup(){ await fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'createBackup',triggeredBy:currentUser.name,role:currentUser.role,note:'Manual dashboard backup'})}); showToast('Backup created in Google Drive.','success'); setTimeout(()=>triggerSyncRefresh(),1500); }
+async function createDatabaseBackup(){ await fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'createBackup',triggeredBy:currentUser.name,role:currentUser.role,note:'Manual dashboard backup'})}); showToast('Backup created in Google Drive.','success'); setTimeout(()=>triggerSyncRefresh(),1500); }
 // ============================================================
 // ADMIN TAB
 // ============================================================
@@ -5320,7 +5358,7 @@ function requestSettlementApproval(){
       submitter:currentUser.username,name:currentUser.name,role:currentUser.role,
       datetime:nowUTC8(),month:dateVal.slice(0,7)};
     var appr=getApprovals(); appr.push(rec); saveApprovals(appr);
-    await fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',
+    await fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
       headers:{'Content-Type':'text/plain'},
       body:JSON.stringify(Object.assign({action:'submitApprovalRequest'},rec))}).catch(function(){});
     ov.remove();
@@ -5361,7 +5399,7 @@ function openSettlementBreakdown(sd){
     window._bdCash=c;window._bdQr=q;window._bdCard=k;window._bdBank=b;
     var sales=getSales();var ri=sales.findIndex(function(r){return r.store===window._bdStore&&r.dateKey===window._bdDate;});
     if(ri>=0){sales[ri].cash=c;sales[ri].qr=q;sales[ri].card=k;sales[ri].bank=b;saveSales(sales);
-      gasPost(_activeCompany,Object.assign({action:'submitSales'},sales[ri])).catch(function(){});
+      gasPost(getCompanyForStore(sales[ri]&&sales[ri].store||currentUser.store),Object.assign({action:'submitSales'},sales[ri])).catch(function(){});
     }
     ov.remove();openSettlementUploadFirst();
   };
@@ -5444,7 +5482,7 @@ async function ufDoUpload(ov){
       // auto-locks the day if this role has confirm_daily permission.
       // (Fire-and-forget via no-cors — same pattern used everywhere else
       // in this app since GAS doesn't support CORS preflight on POST.)
-      await fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',
+      await fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
         headers:{'Content-Type':'text/plain'},
         body:JSON.stringify({action:'uploadSettlement',store:sd.store,dateKey:sd.targetDate,
           fileData:b64,fileName:fi.files[0].name,note:noteVal,
@@ -5467,7 +5505,7 @@ async function ufDoUpload(ov){
           submitter:currentUser.username,name:currentUser.name,role:currentUser.role,
           datetime:nowUTC8(),month:sd.targetDate.slice(0,7)};
         var appr=getApprovals(); appr.push(rec); saveApprovals(appr);
-        await fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',
+        await fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
           headers:{'Content-Type':'text/plain'},
           body:JSON.stringify(Object.assign({action:'submitApprovalRequest'},rec))}).catch(function(){});
         showToast(ZH3?'✅ 收据已上传 — 已提交主管/经理/管理员审批':
@@ -5609,7 +5647,7 @@ async function uploadSettlement() {
       fileData:  b64
     };
 
-    await fetch(gasUrlFor(_activeCompany)||WEB_APP_URL, {
+    await fetch(smartGasUrl(currentUser&&currentUser.store), {
       method:  'POST',
       mode:    'no-cors',
       cache:   'no-cache',
@@ -5987,7 +6025,7 @@ function saveCashMovementEntry(type) {
     saveCashMovements(mvs);
   }
 
-  fetch(gasUrlFor(_activeCompany)||WEB_APP_URL, {
+  fetch(smartGasUrl(currentUser&&currentUser.store), {
     method:'POST', mode:'no-cors', cache:'no-cache',
     headers:{'Content-Type':'text/plain'},
     body: JSON.stringify(Object.assign({action:'submitCashMovement'},record))
@@ -6021,7 +6059,7 @@ function submitCashDrawerFull() {
   };
 
   showToast(lang==='zh'?'正在保存...':'Saving...','pending');
-  fetch(gasUrlFor(_activeCompany)||WEB_APP_URL, {
+  fetch(smartGasUrl(currentUser&&currentUser.store), {
     method:'POST', mode:'no-cors', cache:'no-cache',
     headers:{'Content-Type':'text/plain'},
     body: JSON.stringify(Object.assign({action:'submitCashDrawer'},record))
@@ -6074,7 +6112,7 @@ async function adminClearDeviceBind(username){
   //    Staff phone will self-clear localStorage binding on next login
   showToast(EN?'Sending reset...':'Menghantar reset...','pending');
   try{
-    await fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',
+    await fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
       headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'clearDeviceBinding',username:username,
         clearedBy:currentUser.name,clearedAt:nowUTC8()})});
