@@ -816,7 +816,7 @@ function gasUrlForStore(store){
 // Use this for all company GAS writes
 function smartGasUrl(store){
   if(store&&store!=='HQ'&&store!=='all') return gasUrlForStore(store);
-  return smartGasUrl(currentUser&&currentUser.store);
+  return gasUrlFor(_activeCompany)||WEB_APP_URL;
 }
 
 // Admin helper — returns stores visible to current user
@@ -916,7 +916,7 @@ function getDeviceName(){
 function recordLoginDevice(){
   if(!currentUser) return;
   if(!WEB_APP_URL||WEB_APP_URL.length<10) return; // no company GAS set yet
-  fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',headers:{'Content-Type':'text/plain'},body:JSON.stringify({
+  fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',headers:{'Content-Type':'text/plain'},body:JSON.stringify({
     action:'recordLogin',
     username:currentUser.username,
     name:currentUser.name,
@@ -980,6 +980,26 @@ function getApprovals(){ return loadData('approval_requests', []); }
 function saveApprovals(arr){ cachedApprovals = arr || []; saveData('approval_requests', cachedApprovals); }
 function getAttendance(){ return loadData('attendance_records', []); }
 function saveAttendance(arr){ cachedAttendance = arr || []; saveData('attendance_records', cachedAttendance); }
+// For admin: fetch workZones + workSchedules from ALL company GAS endpoints
+async function syncAllCompanyZonesAndSchedules(){
+  if(!_centralUser||!_centralUser.companies) return;
+  var companies=Object.keys(_centralUser.companies);
+  var allZones=[]; var allScheds=[];
+  await Promise.all(companies.map(async function(co){
+    var url=_centralUser.companies[co]||'';
+    if(!url||url.includes('PASTE_')) return;
+    try{
+      var resp=await fetch(url+'?action=getAppData&t='+Date.now(),{method:'GET',cache:'no-cache'});
+      var d=await resp.json();
+      if(Array.isArray(d.workZones)) d.workZones.forEach(function(z){ z._company=co; allZones.push(z); });
+      if(Array.isArray(d.workSchedules)) d.workSchedules.forEach(function(s){ s._company=co; allScheds.push(s); });
+    }catch(e){}
+  }));
+  if(allZones.length)  saveWorkZones(allZones);
+  if(allScheds.length) saveWorkSchedules(allScheds);
+  renderAdminTab();
+}
+
 function saveWorkZones(arr){ cachedWorkZones = arr || []; saveData('work_zones', cachedWorkZones); }
 function saveWorkSchedules(arr){ cachedWorkSchedules = arr || []; saveData('work_schedules', cachedWorkSchedules); }
 function saveBackups(arr){ cachedBackups = arr || []; saveData('backup_log', cachedBackups); }
@@ -1264,7 +1284,7 @@ async function submitRegisterRequest(){
   try{
     var url=(typeof CENTRAL_GAS_URL!=='undefined'&&!CENTRAL_GAS_URL.includes('PASTE_'))
       ?CENTRAL_GAS_URL:WEB_APP_URL;
-    await fetch(url,{method:'POST',mode:'no-cors',cache:'no-cache',
+    await fetch(((CENTRAL_GAS_URL&&!CENTRAL_GAS_URL.includes("PASTE_"))?CENTRAL_GAS_URL:WEB_APP_URL),{method:'POST',mode:'no-cors',cache:'no-cache',
       headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'registerRequest',username,name,phone,
         company,store,role:'staff',pin,
@@ -1749,7 +1769,7 @@ function setStorePermState(btn){
     sp[store][role][feature] = state==='on' ? 1 : 0;
   }
   saveStorePerms(sp);
-  fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
+  fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',
     headers:{'Content-Type':'text/plain'},
     body:JSON.stringify({action:'saveStorePermissions',storePermissions:sp,savedBy:currentUser.name})}).catch(function(){});
   applyPermissionsToNav();
@@ -1765,7 +1785,7 @@ function clearStorePermOverrides(store, role){
     if(!Object.keys(sp[store]).length) delete sp[store];
   }
   saveStorePerms(sp);
-  fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
+  fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',
     headers:{'Content-Type':'text/plain'},
     body:JSON.stringify({action:'saveStorePermissions',storePermissions:sp,savedBy:currentUser.name})}).catch(function(){});
   applyPermissionsToNav();
@@ -1803,10 +1823,10 @@ function savePermissionsFromUI(){
   renderCurrentTab();
   // Sync global perms to GAS
   if(WEB_APP_URL&&WEB_APP_URL.length>20){
-    fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
+    fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',
       headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'savePermissions',permissions:p,savedBy:currentUser.name})}).catch(function(){});
-    fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
+    fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',
       headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'saveStorePermissions',storePermissions:sp,savedBy:currentUser.name})}).catch(function(){});
   }
@@ -1819,7 +1839,7 @@ function resetPermissionsToDefault(){
   if(!confirm(lang==='en'?'Reset all permissions to default?':'Reset semua kebenaran ke nilai asal?')) return;
   var dp=JSON.parse(JSON.stringify(DEFAULT_PERMS));
   savePerms(dp);
-  fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
+  fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',
     headers:{'Content-Type':'text/plain'},
     body:JSON.stringify({action:'savePermissions',permissions:dp,savedBy:currentUser.name})}).catch(function(){});
   applyPermissionsToNav();
@@ -2112,7 +2132,7 @@ async function sendMonthlyReport(month){
   saveReportSettings(s);
   try{
     var reportMonth=month||(function(){var _e=document.getElementById('report-month');return _e?_e.value:'';})()||dateKeyUTC8().slice(0,7);
-    await fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
+    await fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',
       headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'sendMonthlyReport',emails:s.emails,
         month:reportMonth,sentBy:currentUser.name,role:currentUser.role})});
@@ -3005,7 +3025,7 @@ function _staffSubmitForApproval(withUpload) {
     reason:'Staff sales submission',status:'pending',createdAt:nowUTC8(),
     payload:JSON.stringify({cash:p.cash,qr:p.qr,card:p.card,bank:p.bank,remark:p.remark})};
   const a=getApprovals(); a.push(req); saveApprovals(a);
-  fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
+  fetch(gasUrlForStore(currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
     headers:{'Content-Type':'text/plain'},
     body:JSON.stringify({action:'createApprovalRequest',...req})}).catch(()=>{});
   closeModal();
@@ -4310,7 +4330,7 @@ async function submitAttendance(type){
       remark:remark,accuracy:loc.accuracy,gpsSource:loc.source,deviceId:getDeviceId(),deviceName:getDeviceName(),
       userAgent:navigator.userAgent||'',platform:navigator.platform||''
     };
-    fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
+    fetch(gasUrlForStore(currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
       headers:{'Content-Type':'text/plain'},
       body:JSON.stringify(Object.assign({action:'submitAttendance'},errRecord))
     }).catch(function(){});
@@ -4384,7 +4404,7 @@ function showAttResetModal(username,dateKey,recordId,type,timeStr){
 function resetStaffAttendance(username,dateKey,recordId){
   _serverAtt=_serverAtt.map(function(r){return String(r.id)!==String(recordId)?r:Object.assign({},r,{status:'voided'});});
   _attSession=_attSession.filter(function(r){return String(r.id)!==String(recordId);});
-  fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
+  fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',
     headers:{'Content-Type':'text/plain'},
     body:JSON.stringify({action:'resetAttendance',recordId:recordId,username:username,dateKey:dateKey,
       resetBy:currentUser.name,resetRole:currentUser.role})}).catch(function(){});
@@ -4443,7 +4463,7 @@ function openFixCheckout(recordId, username, dateKey){
       editedAt:nowUTC8()
     };
 
-    fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
+    fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',
       headers:{'Content-Type':'text/plain'},
       body:JSON.stringify(newRecord)}).catch(function(){});
 
@@ -4757,7 +4777,7 @@ async function bulkDecideApprovals(decision){
   for(var i=0;i<ids.length;i++){
     var id=ids[i];
     try{
-      await fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
+      await fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',
         headers:{'Content-Type':'text/plain'},
         body:JSON.stringify({action:decision==='approve'?'approveApprovalRequest':'rejectApprovalRequest',
           id:id,approver:currentUser.name,approverRole:currentUser.role,approverStore:currentUser.store})});
@@ -4821,7 +4841,47 @@ function renderZoneScheduleTools(branches,users){
     <button class="btn success" onclick="saveWorkScheduleFromForm()">Save Work Schedule</button>`;
   var schedSection2=hasPerm('work_schedule')?schedSection:'';
   return `<div class="divider"></div>${zoneSection}${schedSection2}`;}
-async function saveWorkZoneFromForm(){ const payload={action:'saveWorkZone',role:currentUser.role,updatedBy:currentUser.name,store:document.getElementById('zone-store').value,latitude:document.getElementById('zone-lat').value,longitude:document.getElementById('zone-lng').value,radiusMeters:document.getElementById('zone-radius').value,status:'active'}; if(!payload.latitude||!payload.longitude){showToast('Enter latitude and longitude.','error');return;} await fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},body:JSON.stringify(payload)}); showToast('Zone saved.','success'); triggerSyncRefresh(); }
+async function saveWorkZoneFromForm(){
+  var zoneStore=document.getElementById('zone-store').value;
+  var payload={
+    action:'saveWorkZone',
+    role:currentUser.role,
+    updatedBy:currentUser.name,
+    store:zoneStore,
+    latitude:document.getElementById('zone-lat').value,
+    longitude:document.getElementById('zone-lng').value,
+    radiusMeters:document.getElementById('zone-radius').value,
+    status:'active'
+  };
+  if(!payload.latitude||!payload.longitude){showToast('Enter latitude and longitude.','error');return;}
+  if(!zoneStore){showToast('Select a store first.','error');return;}
+  // Route to the company that owns THIS store — not the active company
+  var _zoneUrl=gasUrlForStore(zoneStore);
+  if(!_zoneUrl||_zoneUrl.length<20){
+    showToast('No GAS URL for '+getCompanyForStore(zoneStore)+'. Set it in Central DB.','error');
+    return;
+  }
+  showToast('Saving zone...','pending');
+  await fetch(_zoneUrl,{method:'POST',mode:'no-cors',cache:'no-cache',
+    headers:{'Content-Type':'text/plain'},
+    body:JSON.stringify(payload)}).catch(function(){});
+  // Update local cache immediately
+  var zones=cachedWorkZones.filter(function(z){return z.store!==zoneStore;});
+  zones.push({store:zoneStore,latitude:payload.latitude,longitude:payload.longitude,
+    radiusMeters:payload.radiusMeters||500,status:'active',label:zoneStore});
+  saveWorkZones(zones);
+  showToast('Zone saved for '+zoneStore+' ✅','success');
+  // Sync back to verify
+  setTimeout(function(){
+    var syncUrl=_zoneUrl;
+    fetch(syncUrl+'?action=getAppData&t='+Date.now(),{method:'GET',cache:'no-cache'})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        if(d.workZones) saveWorkZones(d.workZones);
+        renderAdminTab();
+      }).catch(function(){});
+  },2000);
+}
 async function saveWorkScheduleFromForm(){
   var storeEl=document.getElementById('sched-store');
   var store=storeEl?storeEl.value:(currentUser.store||'');
@@ -4832,8 +4892,15 @@ async function saveWorkScheduleFromForm(){
   var end=document.getElementById('sched-end').value;
   if(!start||!end){showToast(lang==='zh'?'请填写开始和结束时间':'Enter start and end time','error');return;}
   var staffUser=document.getElementById('sched-user').value;
+  // Route to the company that owns THIS store
+  var _schedUrl=gasUrlForStore(store);
+  if(!_schedUrl||_schedUrl.length<20){
+    showToast('No GAS URL for '+getCompanyForStore(store)+'. Set it in Central DB.','error');
+    return;
+  }
+  showToast('Saving schedule...','pending');
   var saves=checkedDays.map(function(day){
-    return fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',
+    return fetch(_schedUrl,{method:'POST',mode:'no-cors',cache:'no-cache',
       headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'saveWorkSchedule',role:currentUser.role,
         updatedBy:currentUser.name,username:staffUser,
@@ -4841,10 +4908,35 @@ async function saveWorkScheduleFromForm(){
         graceMinutes:15,status:'active'})});
   });
   await Promise.all(saves).catch(function(){});
+  // Update local cache immediately
+  var scheds=cachedWorkSchedules.filter(function(s){
+    return !(s.store===store&&s.username===staffUser&&checkedDays.indexOf(s.dayOfWeek)>=0);
+  });
+  checkedDays.forEach(function(day){
+    scheds.push({store:store,username:staffUser,dayOfWeek:day,startTime:start,endTime:end,graceMinutes:15,status:'active'});
+  });
+  saveWorkSchedules(scheds);
   showToast((lang==='zh'?'排班已保存 ':'Schedule saved for ')+checkedDays.join(', ')+' ✅','success');
-  triggerSyncRefresh();
+  // Sync back from correct company GAS
+  setTimeout(function(){
+    fetch(_schedUrl+'?action=getAppData&t='+Date.now(),{method:'GET',cache:'no-cache'})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        if(d.workSchedules) saveWorkSchedules(d.workSchedules);
+        renderAdminTab();
+      }).catch(function(){});
+  },2000);
 }
-async function createDatabaseBackup(){ await fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'createBackup',triggeredBy:currentUser.name,role:currentUser.role,note:'Manual dashboard backup'})}); showToast('Backup created in Google Drive.','success'); setTimeout(()=>triggerSyncRefresh(),1500); }
+async function createDatabaseBackup(){
+  var _backupUrl=gasUrlFor(_activeCompany)||WEB_APP_URL;
+  if(!_backupUrl||_backupUrl.length<20){showToast('No GAS URL configured.','error');return;}
+  showToast('Creating backup...','pending');
+  await fetch(_backupUrl,{method:'POST',mode:'no-cors',cache:'no-cache',
+    headers:{'Content-Type':'text/plain'},
+    body:JSON.stringify({action:'createBackup',triggeredBy:currentUser.name,role:currentUser.role,note:'Manual dashboard backup'})
+  }).catch(function(){});
+  showToast('Backup created in Google Drive → Daily Sales Reporter Backups ✅','success');
+}
 // ============================================================
 // ADMIN TAB
 // ============================================================
@@ -4979,8 +5071,11 @@ async function renderAdminTab() {
   if(hasPerm('monthly_report')) renderMonthlyReportPanel();
   if(hasPerm('view_all_companies')){
     renderAllCompanyPanel();
-    // Auto-fetch on first open
     if(!_allCoFetched){ _allCoFetched=true; fetchAllCompanySales(); }
+  }
+  // Admin: sync zones+schedules from ALL company GAS so they display correctly
+  if(currentUser.role==='admin'&&(hasPerm('work_zone')||hasPerm('work_schedule'))){
+    syncAllCompanyZonesAndSchedules().catch(function(){});
   }
 }
 async function approveUser(username) {
@@ -5358,7 +5453,7 @@ function requestSettlementApproval(){
       submitter:currentUser.username,name:currentUser.name,role:currentUser.role,
       datetime:nowUTC8(),month:dateVal.slice(0,7)};
     var appr=getApprovals(); appr.push(rec); saveApprovals(appr);
-    await fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
+    await fetch(gasUrlForStore(currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
       headers:{'Content-Type':'text/plain'},
       body:JSON.stringify(Object.assign({action:'submitApprovalRequest'},rec))}).catch(function(){});
     ov.remove();
@@ -5482,7 +5577,7 @@ async function ufDoUpload(ov){
       // auto-locks the day if this role has confirm_daily permission.
       // (Fire-and-forget via no-cors — same pattern used everywhere else
       // in this app since GAS doesn't support CORS preflight on POST.)
-      await fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
+      await fetch(gasUrlForStore(window._settlementStore||currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
         headers:{'Content-Type':'text/plain'},
         body:JSON.stringify({action:'uploadSettlement',store:sd.store,dateKey:sd.targetDate,
           fileData:b64,fileName:fi.files[0].name,note:noteVal,
@@ -5505,7 +5600,7 @@ async function ufDoUpload(ov){
           submitter:currentUser.username,name:currentUser.name,role:currentUser.role,
           datetime:nowUTC8(),month:sd.targetDate.slice(0,7)};
         var appr=getApprovals(); appr.push(rec); saveApprovals(appr);
-        await fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
+        await fetch(gasUrlForStore(currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
           headers:{'Content-Type':'text/plain'},
           body:JSON.stringify(Object.assign({action:'submitApprovalRequest'},rec))}).catch(function(){});
         showToast(ZH3?'✅ 收据已上传 — 已提交主管/经理/管理员审批':
@@ -5647,7 +5742,7 @@ async function uploadSettlement() {
       fileData:  b64
     };
 
-    await fetch(smartGasUrl(currentUser&&currentUser.store), {
+    await fetch(gasUrlFor(_activeCompany)||WEB_APP_URL, {
       method:  'POST',
       mode:    'no-cors',
       cache:   'no-cache',
@@ -6025,7 +6120,7 @@ function saveCashMovementEntry(type) {
     saveCashMovements(mvs);
   }
 
-  fetch(smartGasUrl(currentUser&&currentUser.store), {
+  fetch(gasUrlFor(_activeCompany)||WEB_APP_URL, {
     method:'POST', mode:'no-cors', cache:'no-cache',
     headers:{'Content-Type':'text/plain'},
     body: JSON.stringify(Object.assign({action:'submitCashMovement'},record))
@@ -6059,7 +6154,7 @@ function submitCashDrawerFull() {
   };
 
   showToast(lang==='zh'?'正在保存...':'Saving...','pending');
-  fetch(smartGasUrl(currentUser&&currentUser.store), {
+  fetch(gasUrlFor(_activeCompany)||WEB_APP_URL, {
     method:'POST', mode:'no-cors', cache:'no-cache',
     headers:{'Content-Type':'text/plain'},
     body: JSON.stringify(Object.assign({action:'submitCashDrawer'},record))
@@ -6112,7 +6207,7 @@ async function adminClearDeviceBind(username){
   //    Staff phone will self-clear localStorage binding on next login
   showToast(EN?'Sending reset...':'Menghantar reset...','pending');
   try{
-    await fetch(smartGasUrl(currentUser&&currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
+    await fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',
       headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'clearDeviceBinding',username:username,
         clearedBy:currentUser.name,clearedAt:nowUTC8()})});
