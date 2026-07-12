@@ -2609,7 +2609,7 @@ async function triggerSyncRefresh() {
             _serverAtt=appJson.attendance; _serverAttLoaded=true;
             saveData('attendance_records',[]);
             if(currentTab==='attendance') renderAttendanceTab();
-            if(currentTab==='admin') renderAdminTab();
+            if(currentTab==='admin') { var el=document.getElementById('tab-admin'); if(el&&!el.innerHTML.includes('spinner-wrap')) if(!_adminRendering) renderAdminTab(); }
           }
           if(Array.isArray(appJson.workZones))     saveWorkZones(appJson.workZones);
           if(Array.isArray(appJson.workSchedules)) saveWorkSchedules(appJson.workSchedules);
@@ -2859,7 +2859,7 @@ function renderCurrentTab() {
   if(currentTab==='summary') renderSummaryTab();
   if(currentTab==='attendance') renderAttendanceTab();
   if(currentTab==='log')     renderLogTab();
-  if(currentTab==='admin')   renderAdminTab();
+  if(currentTab==='admin')   { if(!_adminRendering) renderAdminTab(); }
   if(currentTab==='profile') renderProfileTab();
 }
 
@@ -4473,7 +4473,7 @@ function resetStaffAttendance(username,dateKey,recordId){
     body:JSON.stringify({action:'resetAttendance',recordId:recordId,username:username,dateKey:dateKey,
       resetBy:currentUser.name,resetRole:currentUser.role})}).catch(function(){});
   showToast(('Attendance reset for ')+username,'success');
-  fetchServerAttendance().then(function(){renderAttendanceTab();if(currentTab==='admin')renderAdminTab();});
+  fetchServerAttendance().then(function(){renderAttendanceTab();});
 }
 // Opens the edit modal to add a missing checkout for a specific user/date
 function openFixCheckout(recordId, username, dateKey){
@@ -4596,7 +4596,7 @@ function doEditAttendance(recordId,username,dateKey,type,newTimeHHMM){
       dateKey:dateKey,type:type,newDatetime:newDatetime,
       editedBy:currentUser.name,editedRole:currentUser.role,editedAt:nowUTC8()}).catch(function(){});
   showToast(('Time updated: ')+username+' '+newTimeHHMM+' ✅','success');
-  renderAdminTab();
+  if(currentTab==='admin'&&!_adminRendering) renderAdminTab();
   if(currentTab==='attendance') renderAttendanceTab();
 }
 
@@ -4675,7 +4675,7 @@ function renderOperationsDashboard(){
     ?`<div><label class="field-label">${ZH?'门店':'Store'}</label>
         <div style="padding:10px 12px;border:2px solid var(--border);border-radius:12px;font-weight:700;font-size:14px;background:#f8fafc">🏪 ${currentUser.store}</div></div>`
     :`<div><label class="field-label">${ZH?'门店':'Store'}</label>
-        <select onchange="attendanceStoreFilter=this.value;renderAdminTab()">
+        <select onchange="attendanceStoreFilter=this.value;if(!_adminRendering) renderAdminTab()">
           <option value="all">${ZH?'所有门店':'All Stores'}</option>
           ${allBranches.map(s=>`<option ${attendanceStoreFilter===s?'selected':''}>${s}</option>`).join('')}
         </select></div>`;
@@ -4708,7 +4708,7 @@ function renderOperationsDashboard(){
     <!-- Date + Store filter -->
     <div class="ops-grid" style="margin-top:10px">
       <div><label class="field-label">${ZH?'日期':'Date'}</label>
-        <input type="date" value="${attendanceDateFilter}" onchange="attendanceDateFilter=this.value;renderAdminTab()"></div>
+        <input type="date" value="${attendanceDateFilter}" onchange="attendanceDateFilter=this.value;if(!_adminRendering) renderAdminTab()"></div>
       ${storeFilterHtml}
     </div>
 
@@ -4850,13 +4850,13 @@ async function bulkDecideApprovals(decision){
   }
   saveApprovals(all);
   showToast((ZH?(decision==='approve'?'已批准 ':'已拒绝 '):(decision==='approve'?'Approved ':'Rejected '))+ids.length+(ZH?' 条':''),'success');
-  renderAdminTab();
+  if(!_adminRendering) renderAdminTab();
   setTimeout(function(){triggerSyncRefresh();},1500);
 }
 async function decideApproval(id,decision,company){
   var _co=company||_activeCompany;
-  await gasPost(_co,{action:decision==='approve'?'approveApprovalRequest':'rejectApprovalRequest',id,approver:currentUser.name,approverRole:currentUser.role,approverStore:currentUser.store}); showToast(decision==='approve'?(lang==='zh'?'已批准。':'Approved.'):(lang==='zh'?'已拒绝。':'Rejected.'),'success'); saveApprovals(getApprovals().map(r=>r.id===id?Object.assign({},r,{status:decision==='approve'?'approved':'rejected'}):r)); renderAdminTab(); setTimeout(()=>triggerSyncRefresh(),1500); }
-function renderAttendanceReport(users){ const days=attendanceReportMode==='weekly'?7:31; const start=new Date(attendanceDateFilter); start.setDate(start.getDate()-days+1); const rows=users.filter(u=>attendanceStoreFilter==='all'||u.store===attendanceStoreFilter).map(u=>{ const rec=getAllAttendance().filter(r=>r.username===u.username&&new Date(r.dateKey)>=start&&new Date(r.dateKey)<=new Date(attendanceDateFilter)); return {name:u.name||u.username,present:new Set(rec.filter(r=>r.type==='check_in'&&r.status!=='rejected').map(r=>r.dateKey)).size,late:rec.filter(r=>r.status==='late').length,early:rec.filter(r=>r.status==='early_leave').length}; }); return `<div style="display:flex;justify-content:space-between;align-items:center"><div style="font-size:13px;font-weight:800">${attendanceReportMode==='weekly'?'Weekly':'Monthly'} Attendance Summary</div><select onchange="attendanceReportMode=this.value;renderAdminTab()" style="width:auto;padding:6px 10px"><option value="weekly" ${attendanceReportMode==='weekly'?'selected':''}>Weekly</option><option value="monthly" ${attendanceReportMode==='monthly'?'selected':''}>Monthly</option></select></div>${rows.map(r=>`<div class="stat-row"><span class="stat-label">${r.name}</span><span class="stat-value" style="font-size:13px">P ${r.present} - L ${r.late} - E ${r.early}</span></div>`).join('')}`; }
+  await gasPost(_co,{action:decision==='approve'?'approveApprovalRequest':'rejectApprovalRequest',id,approver:currentUser.name,approverRole:currentUser.role,approverStore:currentUser.store}); showToast(decision==='approve'?(lang==='zh'?'已批准。':'Approved.'):(lang==='zh'?'已拒绝。':'Rejected.'),'success'); saveApprovals(getApprovals().map(r=>r.id===id?Object.assign({},r,{status:decision==='approve'?'approved':'rejected'}):r)); if(!_adminRendering) renderAdminTab(); setTimeout(()=>triggerSyncRefresh(),1500); }
+function renderAttendanceReport(users){ const days=attendanceReportMode==='weekly'?7:31; const start=new Date(attendanceDateFilter); start.setDate(start.getDate()-days+1); const rows=users.filter(u=>attendanceStoreFilter==='all'||u.store===attendanceStoreFilter).map(u=>{ const rec=getAllAttendance().filter(r=>r.username===u.username&&new Date(r.dateKey)>=start&&new Date(r.dateKey)<=new Date(attendanceDateFilter)); return {name:u.name||u.username,present:new Set(rec.filter(r=>r.type==='check_in'&&r.status!=='rejected').map(r=>r.dateKey)).size,late:rec.filter(r=>r.status==='late').length,early:rec.filter(r=>r.status==='early_leave').length}; }); return `<div style="display:flex;justify-content:space-between;align-items:center"><div style="font-size:13px;font-weight:800">${attendanceReportMode==='weekly'?'Weekly':'Monthly'} Attendance Summary</div><select onchange="attendanceReportMode=this.value;if(!_adminRendering) renderAdminTab()" style="width:auto;padding:6px 10px"><option value="weekly" ${attendanceReportMode==='weekly'?'selected':''}>Weekly</option><option value="monthly" ${attendanceReportMode==='monthly'?'selected':''}>Monthly</option></select></div>${rows.map(r=>`<div class="stat-row"><span class="stat-label">${r.name}</span><span class="stat-value" style="font-size:13px">P ${r.present} - L ${r.late} - E ${r.early}</span></div>`).join('')}`; }
 function renderZoneScheduleTools(branches,users){
   var ZH=lang==='zh'; var EN=lang==='en';
   var isAdmin=currentUser.role==='admin';
@@ -5060,7 +5060,11 @@ async function fetchApprovalsForAdmin(){
   }catch(e){ console.warn('approvals fetch failed:',e.message); }
   return false;
 }
+var _adminRendering=false;
 async function renderAdminTab() {
+  if(_adminRendering) return; // prevent re-entrant calls
+  _adminRendering=true;
+  try{
   var ZH=lang==='zh'; var EN=lang==='en';
   // Permission-driven, not a hardcoded role list — Supervisor has
   // view_admin=1 by default and must be able to see/approve requests
@@ -5176,13 +5180,15 @@ async function renderAdminTab() {
   if(currentUser.role==='admin'&&(hasPerm('work_zone')||hasPerm('work_schedule'))){
     setTimeout(function(){syncAllCompanyZonesAndSchedules().catch(function(){});},1000);
   }
+  }catch(e){ console.warn('renderAdminTab error:',e); }
+  finally{ _adminRendering=false; }
 }
 async function approveUser(username) {
   showToast(lang==='zh'?'正在审批...':'Approving...','pending');
   try {
     await fetch((CENTRAL_GAS_URL&&!CENTRAL_GAS_URL.includes("PASTE_"))?CENTRAL_GAS_URL:WEB_APP_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'approveUser',username})});
     if(cachedUsers[username]){cachedUsers[username].status='active';saveData('cached_users',cachedUsers);}
-    showToast(t('approvedMsg'),'success'); renderAdminTab();
+    showToast(t('approvedMsg'),'success'); if(!_adminRendering) renderAdminTab();
   } catch(e){showToast('Error: '+e,'error');}
 }
 async function rejectUser(username) {
@@ -5191,7 +5197,7 @@ async function rejectUser(username) {
   try {
     await fetch((CENTRAL_GAS_URL&&!CENTRAL_GAS_URL.includes("PASTE_"))?CENTRAL_GAS_URL:WEB_APP_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'rejectUser',username})});
     delete cachedUsers[username]; saveData('cached_users',cachedUsers);
-    showToast(t('rejectedMsg'),'success'); renderAdminTab();
+    showToast(t('rejectedMsg'),'success'); if(!_adminRendering) renderAdminTab();
   } catch(e){showToast('Error: '+e,'error');}
 }
 function openAddUser() {
@@ -5231,7 +5237,7 @@ async function saveUserEdit() {
     if(originalKey&&originalKey!==username) delete cachedUsers[originalKey];
     cachedUsers[username]={name,phone,pin,role,store,status:'active'};
     saveData('cached_users',cachedUsers);
-    showToast(t('userSaved'),'success'); closeUserEditModal(); renderAdminTab();
+    showToast(t('userSaved'),'success'); closeUserEditModal(); if(!_adminRendering) renderAdminTab();
   } catch(e){showToast('Error: '+e,'error');}
 }
 async function deleteUser(username) {
@@ -5246,7 +5252,7 @@ async function deleteUser(username) {
       if(String(b[k]).toLowerCase()===String(username).toLowerCase()){delete b[k];changed=true;}
     });
     if(changed) saveData('_device_bindings',b);
-    showToast(t('userDeleted'),'success'); renderAdminTab();
+    showToast(t('userDeleted'),'success'); if(!_adminRendering) renderAdminTab();
   } catch(e){showToast('Error: '+e,'error');}
 }
 
@@ -5266,7 +5272,7 @@ async function resignUser(username, name){
     if(cachedUsers&&cachedUsers[username]) cachedUsers[username].status='resigned';
     saveData('cached_users',cachedUsers);
     showToast((EN?'"'+name+'" marked Resigned. Records preserved.':'"'+name+'" ditandakan Berhenti.'),'success');
-    renderAdminTab();
+    if(!_adminRendering) renderAdminTab();
   }catch(e){showToast('Error: '+e.message,'error');}
 }
 
@@ -5284,7 +5290,7 @@ async function rehireUser(username, name){
     if(cachedUsers&&cachedUsers[username]) cachedUsers[username].status='active';
     saveData('cached_users',cachedUsers);
     showToast((EN?'"'+name+'" re-hired! Account restored.':'"'+name+'" telah diambil balik!'),'success');
-    renderAdminTab();
+    if(!_adminRendering) renderAdminTab();
   }catch(e){showToast('Error: '+e.message,'error');}
 }
 
@@ -6321,7 +6327,7 @@ async function adminClearDeviceBind(username){
     showToast((EN?'Network error, try again: ':'Ralat rangkaian: ')+e.message.slice(0,50),'error');
     return;
   }
-  renderAdminTab();
+  if(!_adminRendering) renderAdminTab();
 }
 
 // Delegated click: handles dynamically rendered buttons (avoids onclick quote issues)
