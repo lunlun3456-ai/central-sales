@@ -1900,11 +1900,13 @@ function renderPermissionsPanel(){
 
   var globalRolePerms = p[selRole] || DEFAULT_PERMS[selRole] || {};
 
-  // Determine the key being edited
-  var editKey = selScope==='global' ? '__global__'
+  // editKey is the actual localStorage key used in storePerms
+  // selStore stores the RAW value (company name, store name, username)
+  // editKey adds the correct prefix for the scope
+  var editKey = selScope==='global'   ? '__global__'
     : selScope==='company' ? '__company__'+selStore
     : selScope==='user'    ? '__user__'+selStore
-    : selStore; // store scope
+    : selStore; // store scope — selStore IS the key already
   var storeOverride = (sp[editKey]&&sp[editKey][selRole]) ? sp[editKey][selRole] : null;
 
   // ── Scope tabs ──────────────────────────────────────────────
@@ -1944,54 +1946,52 @@ function renderPermissionsPanel(){
           :'ℹ️ Ini adalah kebenaran lalai untuk setiap peranan. Guna tab lain untuk tetapkan pengecualian.')
     +'</div>';
   } else if(selScope==='company'){
-    // Company picker
     var coList=ALL_COMPANIES;
     html+='<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px">'
       +coList.map(function(co){
+        // selStore stores RAW company name — editKey adds __company__ prefix
+        var act=selStore===co;
         var coKey='__company__'+co;
-        var act=selStore===coKey;
         var hasOvr=sp[coKey]&&sp[coKey][selRole]&&Object.keys(sp[coKey][selRole]).length>0;
-        return '<button onclick="window._permStore=\''+coKey.replace(/'/g,"\\'")+'\';renderPermissionsPanel()" '
-          +'style="padding:6px 9px;border-radius:10px;font-size:11px;font-weight:700;cursor:pointer;'
-          +'border:2px solid '+(act?'#1e3a8a':'var(--border)')+';background:'+(act?'#1e3a8a':'#f8fafc')+';color:'+(act?'#fff':'#334155')+'">'
-          +co+(hasOvr?'<span style="margin-left:3px;font-size:9px;background:#f59e0b;color:#fff;border-radius:20px;padding:0 4px">✏</span>':'')
+        return '<button onclick="window._permStore=\''+co.replace(/'/g,"\\'")+'\';renderPermissionsPanel()" '
+          +'style="padding:6px 10px;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;'
+          +'border:2px solid '+(act?'var(--primary)':'var(--border)')+';background:'+(act?'var(--primary)':'var(--card)')+';color:'+(act?'#fff':'var(--text2)')+'">'
+          +co+(hasOvr?'<span style="margin-left:3px;font-size:9px;background:var(--warning);color:#fff;border-radius:10px;padding:0 4px">✏</span>':'')
         +'</button>';
       }).join('')+'</div>';
   } else if(selScope==='store'){
-    // Store picker
     var storeOptions=getAdminStores();
     html+='<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px">'
       +storeOptions.map(function(s){
         var act=selStore===s;
         var hasOvr=sp[s]&&sp[s][selRole]&&Object.keys(sp[s][selRole]).length>0;
-        var lbl=s.replace('Bonia ','B.').replace('Polo ','P.').replace('Gm ','G.');
         return '<button onclick="window._permStore=\''+s.replace(/'/g,"\\'")+'\';renderPermissionsPanel()" '
-          +'style="padding:6px 9px;border-radius:10px;font-size:11px;font-weight:700;cursor:pointer;'
-          +'border:2px solid '+(act?'#1e3a8a':'var(--border)')+';background:'+(act?'#1e3a8a':'#f8fafc')+';color:'+(act?'#fff':'#334155')+'">'
-          +lbl+(hasOvr?'<span style="margin-left:3px;font-size:9px;background:#f59e0b;color:#fff;border-radius:20px;padding:0 4px">✏</span>':'')
+          +'style="padding:6px 10px;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;'
+          +'border:2px solid '+(act?'var(--primary)':'var(--border)')+';background:'+(act?'var(--primary)':'var(--card)')+';color:'+(act?'#fff':'var(--text2)')+'">'
+          +s+(hasOvr?'<span style="margin-left:3px;font-size:9px;background:var(--warning);color:#fff;border-radius:10px;padding:0 4px">✏</span>':'')
         +'</button>';
       }).join('')+'</div>';
   } else if(selScope==='user'){
-    // User picker — all active staff
     var allUsers=Object.entries(cachedUsers||{}).filter(function(e){return e[1].status==='active';});
-    html+='<div style="max-height:150px;overflow-y:auto;border:1.5px solid var(--border);border-radius:10px;padding:6px;margin-bottom:12px">'
+    html+='<div style="max-height:180px;overflow-y:auto;border:1.5px solid var(--border);border-radius:12px;padding:6px;margin-bottom:12px;background:var(--card)">'
       +(allUsers.length?allUsers.map(function(e){
         var uname=e[0]; var u=e[1];
+        // selStore stores RAW username — editKey adds __user__ prefix
+        var act=selStore===uname;
         var uKey='__user__'+uname;
-        var act=selStore===uKey;
         var hasOvr=sp[uKey]&&Object.keys(sp[uKey]).length>0;
-        return '<div onclick="window._permStore=\''+uKey.replace(/'/g,"\\'")+'\';renderPermissionsPanel()" '
+        return '<div onclick="window._permStore=\''+uname.replace(/'/g,"\\'")+'\';renderPermissionsPanel()" '
           +'style="display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:8px;cursor:pointer;'
-          +'background:'+(act?'#eff6ff':'transparent')+';margin-bottom:2px">'
-          +'<div style="width:28px;height:28px;border-radius:50%;background:'+(act?'#1e3a8a':'#e2e8f0')+';color:'+(act?'#fff':'#475569')
+          +'background:'+(act?'var(--primary-lt)':'transparent')+';margin-bottom:2px">'
+          +'<div style="width:28px;height:28px;border-radius:50%;background:'+(act?'var(--primary)':'var(--bg2)')+';color:'+(act?'#fff':'var(--text2)')
             +';display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;flex-shrink:0">'+(u.name||uname)[0].toUpperCase()+'</div>'
           +'<div style="flex:1;min-width:0">'
-            +'<div style="font-size:12px;font-weight:700;color:'+(act?'#1e3a8a':'var(--text)')+'">'+((u.name||uname))+'</div>'
+            +'<div style="font-size:12px;font-weight:700;color:'+(act?'var(--primary)':'var(--text)')+'">'+((u.name||uname))+'</div>'
             +'<div style="font-size:10px;color:var(--text2)">@'+uname+' · '+(u.store||'')+'</div>'
           +'</div>'
-          +(hasOvr?'<span style="font-size:9px;background:#f59e0b;color:#fff;border-radius:20px;padding:1px 6px">custom</span>':'')
+          +(hasOvr?'<span style="font-size:9px;background:var(--warning);color:#fff;border-radius:10px;padding:1px 6px;font-weight:700">custom</span>':'')
         +'</div>';
-      }).join(''):('<div style="text-align:center;color:#94a3b8;font-size:12px;padding:12px">'+(EN?'No users cached. Sync first.':'Tiada pengguna. Segerak dahulu.')+'</div>'))
+      }).join(''):('<div style="text-align:center;color:var(--text2);font-size:12px;padding:12px">'+(EN?'No users cached. Sync first.':'Tiada pengguna. Segerak dahulu.')+'</div>'))
     +'</div>';
   }
 
@@ -2081,11 +2081,15 @@ function renderPermissionsPanel(){
           +'<div style="display:flex;gap:3px">'
           +['inherit','on','off'].map(function(st){
             var act=state===st;
-            return '<button class="perm-store-btn" data-store="'+selStore.replace(/"/g,'&quot;')+'"'
+            var sc={inherit:'var(--text2)',on:'var(--success)',off:'var(--danger)'};
+            var bg={inherit:'var(--card2)',on:'var(--success-lt)',off:'var(--danger-lt)'};
+            return '<button class="perm-store-btn"'
+              +' data-store="'+(selStore||'').replace(/"/g,'&quot;')+'"'
+              +' data-scope="'+selScope+'"'
               +' data-role="'+selRole+'" data-feature="'+f.key+'" data-state="'+st+'"'
-              +' onclick="setStorePermState(this)" style="flex:1;padding:4px;border-radius:6px;font-size:10px;font-weight:800;cursor:pointer;'
-              +'border:1.5px solid '+(act?sc[st]:'var(--border)')+';background:'+(act?sc[st]:'#f8fafc')+';color:'+(act?'#fff':sc[st])+'">'
-              +(st==='inherit'?'↩':'')+(st==='on'?'ON':'')+(st==='off'?'OFF':'')+(st==='inherit'?' '+(globalVal?'ON':'OFF'):'')
+              +' onclick="setStorePermState(this)" style="flex:1;padding:5px 4px;border-radius:8px;font-size:10px;font-weight:800;cursor:pointer;'
+              +'border:1.5px solid '+(act?sc[st]:'var(--border)')+';background:'+(act?bg[act&&st==='on'?'on':st==='off'?'off':'inherit']:'var(--card2)')+';color:'+(act?sc[st]:'var(--text3)')+'">'
+              +(st==='inherit'?'↩ '+(globalVal?'ON':'OFF'):st==='on'?'✓ ON':'✕ OFF')
             +'</button>';
           }).join('')
           +'</div></div>';
@@ -2104,7 +2108,8 @@ function renderPermissionsPanel(){
     +'</div>';
   } else if(!isBoss){
     html += '<div style="display:flex;gap:8px;margin-top:12px">'
-      +'<button class="btn secondary" style="flex:1;font-size:13px" onclick="clearStorePermOverrides(\''+selStore.replace(/'/g,"\\'")+'\',\''+selRole+'\')">🗑 Clear overrides for '+selStore+'</button>'
+      +'<button class="btn success" style="flex:2;font-size:13px" onclick="savePermissionsFromUI()">💾 '+(EN?'Save Overrides':'Simpan Lebihan')+'</button>'
+      +'<button class="btn secondary" style="flex:1;font-size:12px" onclick="clearStorePermOverrides(\''+editKey.replace(/'/g,"\\'")+'\',\''+selRole+'\')">🗑 Clear</button>'
     +'</div>';
   }
   html += '<div id="perms-saved-msg" style="display:none;text-align:center;font-size:12px;color:#10b981;font-weight:700;margin-top:8px">✅ '+(EN?t('permsSaved'):'Kebenaran disimpan!')+'</div>';
@@ -2112,19 +2117,24 @@ function renderPermissionsPanel(){
 }
 
 function setStorePermState(btn){
-  var store   = btn.dataset.store;
+  var rawStore= btn.dataset.store;   // raw value: company name, store name, or username
+  var scope   = btn.dataset.scope||'store';
   var role    = btn.dataset.role;
   var feature = btn.dataset.feature;
   var state   = btn.dataset.state;
+  // Build the actual storage key with correct prefix
+  var storeKey= scope==='company' ? '__company__'+rawStore
+    : scope==='user' ? '__user__'+rawStore
+    : rawStore; // store scope — no prefix
   var sp = getStorePerms();
-  if(!sp[store])       sp[store]={};
-  if(!sp[store][role]) sp[store][role]={};
+  if(!sp[storeKey])       sp[storeKey]={};
+  if(!sp[storeKey][role]) sp[storeKey][role]={};
   if(state==='inherit'){
-    delete sp[store][role][feature];
-    if(!Object.keys(sp[store][role]).length) delete sp[store][role];
-    if(!Object.keys(sp[store]).length)       delete sp[store];
+    delete sp[storeKey][role][feature];
+    if(!Object.keys(sp[storeKey][role]).length) delete sp[storeKey][role];
+    if(!Object.keys(sp[storeKey]).length)       delete sp[storeKey];
   } else {
-    sp[store][role][feature] = state==='on' ? 1 : 0;
+    sp[storeKey][role][feature] = state==='on' ? 1 : 0;
   }
   saveStorePerms(sp);
   fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',
