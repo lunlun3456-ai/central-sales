@@ -4276,9 +4276,20 @@ function _renderAttendanceContent(){
   }
 
   // Recent history
+  // ── Recent History — last 30 days, with month navigation ──
+  if(!window._attHistMonth) window._attHistMonth=today.slice(0,7);
+  var histMonth=window._attHistMonth;
+  var prevMonth=(function(){var d=new Date(histMonth+'-01');d.setMonth(d.getMonth()-1);return d.toLocaleDateString('en-CA',{timeZone:'Asia/Kuala_Lumpur'}).slice(0,7);})();
+  var nextMonth=(function(){var d=new Date(histMonth+'-01');d.setMonth(d.getMonth()+1);return d.toLocaleDateString('en-CA',{timeZone:'Asia/Kuala_Lumpur'}).slice(0,7);})();
+  var isCurrentMonth=histMonth===today.slice(0,7);
+
   var recent=getAllAttendance()
-    .filter(function(r){return r.username===currentUser.username&&r.dateKey<today;})
-    .sort(function(a,b){return b.dateKey.localeCompare(a.dateKey)||b.datetime.localeCompare(a.datetime);}).slice(0,20);
+    .filter(function(r){
+      return r.username===currentUser.username
+        && String(r.dateKey||'').slice(0,7)===histMonth
+        && r.dateKey!==today; // today shown above
+    })
+    .sort(function(a,b){return b.dateKey.localeCompare(a.dateKey)||String(b.datetime).localeCompare(String(a.datetime));});
   var _canResetHist=['admin','manager'].includes(currentUser.role);
   var recRows=recent.map(function(r){
     var ci=r.type==='check_in';
@@ -4324,7 +4335,22 @@ function _renderAttendanceContent(){
       +(!inTime&&!inRejected?'<div style="font-size:11px;color:#94a3b8;text-align:center;margin-top:6px">'+(ZH?'点击签到开始今日工作':'Tap Check In to start your day')+'</div>':'')
     +'</div>'
     +(todayAll.length?'<div class="card" style="margin-bottom:10px"><div class="card-title" style="display:flex;align-items:center;gap:6px">📋 '+(ZH?'今日记录':'Today\'s Activity')+'<span style="font-size:10px;background:var(--bg2);color:#64748b;border-radius:20px;padding:1px 8px;font-weight:700">'+todayAll.length+'</span></div>'+todayRows+'</div>':'')
-    +(recent.length?'<div class="card"><div class="card-title">'+(ZH?'近期记录':'Recent History')+'</div>'+recRows+'</div>':'')
+    +(recent.length||!isCurrentMonth?
+      '<div class="card">'
+      +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">'
+        +'<div class="card-title">'+(ZH?'历史记录':'Attendance History')+'</div>'
+        +'<div style="display:flex;align-items:center;gap:4px">'
+          +'<button onclick="window._attHistMonth=\''+prevMonth+'\';_renderAttendanceContent()" '
+            +'style="padding:4px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card2);color:var(--text2);font-size:13px;font-weight:700;cursor:pointer">‹</button>'
+          +'<span style="font-size:12px;font-weight:700;color:var(--text);min-width:70px;text-align:center">'+histMonth+'</span>'
+          +(isCurrentMonth?'<button style="padding:4px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg2);color:var(--text3);font-size:13px;cursor:not-allowed" disabled>›</button>'
+            :'<button onclick="window._attHistMonth=\''+nextMonth+'\';_renderAttendanceContent()" '
+              +'style="padding:4px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card2);color:var(--text2);font-size:13px;font-weight:700;cursor:pointer">›</button>')
+        +'</div>'
+      +'</div>'
+      +(recent.length?recRows:'<div class="empty-state" style="padding:20px"><p>'+(ZH?'本月暂无记录':'No records for this month')+'</p></div>')
+      +'</div>'
+      :'')
     +'<div class="card" id="leave-calendar-card">'
       +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'
         +'<div class="card-title" style="margin:0">📆 '+(ZH?'请假/休假 日历':'Leave & Off Day Calendar')+'</div>'
@@ -4563,30 +4589,66 @@ function saveLeaveFromModal(){
 
   var rec={
     id:'leave_'+Date.now()+'_'+username,
-    username:username,
-    name:name,
-    store:currentUser.store,
-    type:type,
-    dateFrom:from,
-    dateTo:to,
-    remark:remark,
-    createdBy:currentUser.username,
-    createdAt:nowUTC8()
+    username:username, name:name,
+    store:currentUser.store, type:type,
+    dateFrom:from, dateTo:to, remark:remark,
+    createdBy:currentUser.username, createdAt:nowUTC8()
   };
 
-  saveLeaveRecord(rec);
+  // GPS check — staff and supervisor must be in zone to submit leave
+  // Admin and manager can submit from anywhere (they manage schedules remotely)
+  // Off Day type submitted by admin/manager on behalf of staff is always allowed
+  var roleNeedsGPS=['staff','supervisor'].includes(currentUser.role);
+  var isOwnLeave=username===currentUser.username;
 
-  // Sync to Central DB spreadsheet (not company GAS)
+  if(roleNeedsGPS&&isOwnLeave){
+    // Check if zone is configured for this store
+    var zones=(cachedWorkZones||[]).filter(function(z){return z.store===currentUser.store&&String(z.status||'active')==='active';});
+    if(zones.length>0){
+      // Must get GPS first
+      if(!navigator.geolocation){
+        showToast(EN?'GPS not available on this device':'GPS tidak tersedia','error');return;
+      }
+      showToast(EN?'Checking your location...':'Semak lokasi anda...','pending');
+      navigator.geolocation.getCurrentPosition(
+        function(pos){
+          var lat=pos.coords.latitude, lng=pos.coords.longitude;
+          var acc=Math.round(pos.coords.accuracy||99);
+          var zone=nearestLocalZone(currentUser.store,lat,lng);
+          if(zone&&zone.distanceMeters>(zone.radiusMeters+50)){
+            // Outside zone
+            showToast((EN?'You are outside work zone (':'Anda di luar zon kerja (')+zone.distanceMeters+'m, max '+zone.radiusMeters+'m)','error');
+            return;
+          }
+          // In zone — proceed
+          rec.lat=lat; rec.lng=lng; rec.accuracy=acc;
+          _doSaveLeave(rec);
+        },
+        function(err){
+          // GPS failed — allow with warning (don't block if GPS unavailable)
+          showToast(EN?'GPS failed, submitting without location':'GPS gagal, hantar tanpa lokasi','pending');
+          _doSaveLeave(rec);
+        },
+        {enableHighAccuracy:true,timeout:8000,maximumAge:0}
+      );
+      return; // GPS callback handles the rest
+    }
+    // No zone configured — allow
+  }
+  _doSaveLeave(rec);
+}
+
+function _doSaveLeave(rec){
+  var EN=lang==='en';
+  saveLeaveRecord(rec);
   var centralUrl=CENTRAL_GAS_URL&&!CENTRAL_GAS_URL.includes('PASTE_')?CENTRAL_GAS_URL:'';
   if(centralUrl){
     fetch(centralUrl,{method:'POST',mode:'no-cors',cache:'no-cache',
       headers:{'Content-Type':'text/plain'},
       body:JSON.stringify(Object.assign({action:'saveLeave'},rec))}).catch(function(){});
   }
-
   var m=document.getElementById('add-leave-modal');if(m)m.remove();
-  showToast((EN?'Leave saved: ':'Cuti disimpan: ')+from+(to!==from?' → '+to:''),'success');
-  // Refresh calendar
+  showToast((EN?'Leave saved: ':'Cuti disimpan: ')+rec.dateFrom+(rec.dateTo!==rec.dateFrom?' → '+rec.dateTo:''),'success');
   var ci=document.getElementById('leave-calendar-inner');
   if(ci) ci.innerHTML=renderLeaveCalendar();
 }
