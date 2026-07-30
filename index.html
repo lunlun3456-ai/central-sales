@@ -762,7 +762,7 @@
         <!-- version -->
         <text x="314" y="216"
           font-family="system-ui,-apple-system,sans-serif"
-          font-weight="600" font-size="9" fill="#cbd5e1" text-anchor="end">v4.8</text>
+          font-weight="600" font-size="9" fill="#cbd5e1" text-anchor="end">v4.8.0</text>
 
       </svg>
     </div><!-- /login-logo -->
@@ -827,7 +827,7 @@
         <!-- by ki -->
         <text x="34" y="28" font-family="system-ui,-apple-system,sans-serif" font-weight="700" font-size="9" fill="rgba(255,255,255,0.45)" font-style="italic">by ki</text>
         <!-- version -->
-        <text x="198" y="34" font-family="system-ui,-apple-system,sans-serif" font-weight="600" font-size="7.5" fill="rgba(255,255,255,0.5)" text-anchor="end">v4.8</text>
+        <text x="198" y="34" font-family="system-ui,-apple-system,sans-serif" font-weight="600" font-size="7.5" fill="rgba(255,255,255,0.5)" text-anchor="end">v4.8.0</text>
       </svg>
       <div class="sub" id="app-user-info"></div>
     </div>
@@ -1521,7 +1521,7 @@ const T = {
     selectStoreFrst:'请先选择门店',
     latLngRequired:'请输入经纬度坐标',
     zoneSaved:'区域已保存。',
-    // ── Additional zh keys v4.8 ──
+    // ── Additional zh keys v4.8.0 ──
     totalSalesLabel:'总销售额',storeLabel:'门店',dateLabel2:'日期',
     updateSalesBtn:'📝 更新销售',confirmDailyBtn:'📎 确认每日销售 (上传收据)',
     requestApprovalBtn:'📋 申请结算审批',
@@ -2927,7 +2927,7 @@ function shareMonthlyWhatsApp(month){
   lines.push('─────────────────────');
   lines.push('*'+(EN?'GRAND TOTAL: RM ':'JUMLAH KESELURUHAN: RM ')+grandTotal.toFixed(2)+'*');
   lines.push('');
-  lines.push('_Daily Sales Reporter v4.8_');
+  lines.push('_Daily Sales Reporter v4.8.0_');
   var msg=lines.join('\n');
   // WhatsApp - check if recipient phone in email field
   var s2=getReportSettings();
@@ -5238,14 +5238,46 @@ function renderOperationsDashboard(){
   var branches=allBranches;
 
   // Only staff & supervisor count for attendance headcount
-  const attUsers=users.filter(u=>['staff','supervisor'].includes(u.role)&&u.store!=='HQ');
-  const storeAttUsers=attendanceStoreFilter==='all'
+  var attUsers=users.filter(function(u){return ['staff','supervisor'].includes(u.role)&&u.store!=='HQ';});
+  var storeAttUsers=attendanceStoreFilter==='all'
     ? attUsers
-    : attUsers.filter(u=>u.store===attendanceStoreFilter);
+    : attUsers.filter(function(u){return u.store===attendanceStoreFilter;});
 
-  const presentSet=new Set(att.filter(r=>r.type==='check_in'&&r.status!=='rejected'&&r.status!=='voided').map(r=>r.username));
-  const presentList=storeAttUsers.filter(u=>presentSet.has(u.username));
-  const absentList =storeAttUsers.filter(u=>!presentSet.has(u.username));
+  var presentSet=new Set(att.filter(function(r){return r.type==='check_in'&&r.status!=='rejected'&&r.status!=='voided';}).map(function(r){return r.username;}));
+
+  // Only count as "absent" if the user is scheduled to work today
+  // A user is considered "working today" if:
+  // 1. They have a work schedule entry for today's day-of-week, OR
+  // 2. They checked in within the last 14 days (active worker, no schedule set), OR
+  // 3. They already checked in today (present)
+  var todayDayName=(function(){
+    var days=['SUNDAY','MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY'];
+    return days[new Date().getDay()];
+  })();
+  var last14Days=new Set();
+  (function(){
+    for(var d=0;d<14;d++){
+      var dd=new Date(); dd.setDate(dd.getDate()-d);
+      last14Days.add(dd.toLocaleDateString('en-CA',{timeZone:'Asia/Kuala_Lumpur'}));
+    }
+  })();
+  var recentActiveUsers=new Set(getAllAttendance().filter(function(r){
+    return r.type==='check_in'&&last14Days.has(r.dateKey);
+  }).map(function(r){return r.username;}));
+
+  var scheduledUsers=new Set((cachedWorkSchedules||[]).filter(function(s){
+    return String(s.status||'active')==='active'&&
+      (s.dayOfWeek.toUpperCase()===todayDayName||s.dayOfWeek.toUpperCase()==='ALL');
+  }).map(function(s){return String(s.username||'').toLowerCase();}));
+
+  // A user counts for attendance if scheduled today OR was active recently
+  var todayAttUsers=storeAttUsers.filter(function(u){
+    var uname=String(u.username||'').toLowerCase();
+    return presentSet.has(uname)||scheduledUsers.has(uname)||recentActiveUsers.has(uname);
+  });
+
+  var presentList=todayAttUsers.filter(function(u){return presentSet.has(u.username);});
+  var absentList =todayAttUsers.filter(function(u){return !presentSet.has(u.username);});
 
   // Store filter — supervisor sees locked label, manager/admin sees dropdown
   const storeFilterHtml=isSupervisor
