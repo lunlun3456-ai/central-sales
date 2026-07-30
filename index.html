@@ -762,7 +762,7 @@
         <!-- version -->
         <text x="314" y="216"
           font-family="system-ui,-apple-system,sans-serif"
-          font-weight="600" font-size="9" fill="#cbd5e1" text-anchor="end">v4.8</text>
+          font-weight="600" font-size="9" fill="#cbd5e1" text-anchor="end">v4.8.0</text>
 
       </svg>
     </div><!-- /login-logo -->
@@ -827,7 +827,7 @@
         <!-- by ki -->
         <text x="34" y="28" font-family="system-ui,-apple-system,sans-serif" font-weight="700" font-size="9" fill="rgba(255,255,255,0.45)" font-style="italic">by ki</text>
         <!-- version -->
-        <text x="198" y="34" font-family="system-ui,-apple-system,sans-serif" font-weight="600" font-size="7.5" fill="rgba(255,255,255,0.5)" text-anchor="end">v4.8</text>
+        <text x="198" y="34" font-family="system-ui,-apple-system,sans-serif" font-weight="600" font-size="7.5" fill="rgba(255,255,255,0.5)" text-anchor="end">v4.8.0</text>
       </svg>
       <div class="sub" id="app-user-info"></div>
     </div>
@@ -1507,7 +1507,7 @@ const T = {
     selectStoreFrst:'请先选择门店',
     latLngRequired:'请输入经纬度坐标',
     zoneSaved:'区域已保存。',
-    // ── Additional zh keys v4.8 ──
+    // ── Additional zh keys v4.8.0 ──
     totalSalesLabel:'总销售额',storeLabel:'门店',dateLabel2:'日期',
     updateSalesBtn:'📝 更新销售',confirmDailyBtn:'📎 确认每日销售 (上传收据)',
     requestApprovalBtn:'📋 申请结算审批',
@@ -2246,22 +2246,44 @@ var _serverAtt = [];   // fetched from GAS, in-memory only
 var _serverAttLoaded = false;
 
 async function fetchServerAttendance(){
+  // For admin: fetch attendance from ALL company GAS endpoints
+  if(currentUser&&currentUser.role==='admin'&&_centralUser&&_centralUser.companies){
+    var companies=_centralUser.companies;
+    var allAtt=[];
+    await Promise.all(Object.keys(companies).map(async function(co){
+      var url=companies[co]||'';
+      if(!url||url.includes('PASTE_')||url.length<20) return;
+      try{
+        var resp=await fetchWithTimeout(url+'?action=getAttendance&t='+Date.now(),
+          {method:'GET',cache:'no-cache'},8000);
+        var r=await resp.json();
+        var arr=(r&&Array.isArray(r.attendance))?r.attendance:[];
+        arr.forEach(function(a){a._company=co;allAtt.push(a);});
+      }catch(e){}
+    }));
+    if(allAtt.length>0){
+      _serverAtt=allAtt;
+      _serverAttLoaded=true;
+      saveData('attendance_records',[]);
+    }
+    return;
+  }
+
+  // Non-admin: fetch from active company only
   try{
-    var r = await gasGet('getAttendance');
-    var arr = (r && Array.isArray(r.attendance)) ? r.attendance
-             : (Array.isArray(r) ? r : null);
+    var r=await gasGet('getAttendance');
+    var arr=(r&&Array.isArray(r.attendance))?r.attendance
+           :(Array.isArray(r)?r:null);
     if(!arr){
-      // try getAppData fallback
-      var r2 = await gasGet('getAppData');
-      if(r2 && Array.isArray(r2.attendance)) arr = r2.attendance;
+      var r2=await gasGet('getAppData');
+      if(r2&&Array.isArray(r2.attendance)) arr=r2.attendance;
     }
     if(arr){
-      _serverAtt = arr;
-      _serverAttLoaded = true;
-      // Also wipe old phone localStorage
-      saveData('attendance_records', []);
+      _serverAtt=arr;
+      _serverAttLoaded=true;
+      saveData('attendance_records',[]);
     }
-  }catch(e){ console.warn('fetchServerAttendance error:', e); }
+  }catch(e){}
 }
 
 function getAllAttendance(){
@@ -2871,7 +2893,7 @@ function shareMonthlyWhatsApp(month){
   lines.push('─────────────────────');
   lines.push('*'+(EN?'GRAND TOTAL: RM ':'JUMLAH KESELURUHAN: RM ')+grandTotal.toFixed(2)+'*');
   lines.push('');
-  lines.push('_Daily Sales Reporter v4.8_');
+  lines.push('_Daily Sales Reporter v4.8.0_');
   var msg=lines.join('\n');
   // WhatsApp - check if recipient phone in email field
   var s2=getReportSettings();
@@ -5155,7 +5177,7 @@ function attendanceRowHtml(r){
 
 function renderOperationsDashboard(){
   var ZH=lang==='zh'; var EN=lang==='en';
-  const users=Object.entries(cachedUsers).filter(([,u])=>u.status==='active').map(([username,u])=>({username,...u}));
+  var users=Object.entries(cachedUsers).filter(function(e){return e[1].status==='active';}).map(function(e){return Object.assign({username:e[0]},e[1]);});
 
   // ── Role-based store access ───────────────────────────────────
   const isSupervisor=currentUser.role==='supervisor';
@@ -5174,8 +5196,8 @@ function renderOperationsDashboard(){
   const pending=getApprovals().filter(r=>r.status==='pending'
     &&(_seeAllStores||r.store===currentUser.store));
 
-  const allBranches=getAdminStores();
-  const branches=isAdmin?STORES:allBranches;
+  var allBranches=getAdminStores();
+  var branches=allBranches;
 
   // Only staff & supervisor count for attendance headcount
   const attUsers=users.filter(u=>['staff','supervisor'].includes(u.role)&&u.store!=='HQ');
