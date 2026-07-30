@@ -762,7 +762,7 @@
         <!-- version -->
         <text x="314" y="216"
           font-family="system-ui,-apple-system,sans-serif"
-          font-weight="600" font-size="9" fill="#cbd5e1" text-anchor="end">v4.8.0</text>
+          font-weight="600" font-size="9" fill="#cbd5e1" text-anchor="end">v4.8</text>
 
       </svg>
     </div><!-- /login-logo -->
@@ -827,7 +827,7 @@
         <!-- by ki -->
         <text x="34" y="28" font-family="system-ui,-apple-system,sans-serif" font-weight="700" font-size="9" fill="rgba(255,255,255,0.45)" font-style="italic">by ki</text>
         <!-- version -->
-        <text x="198" y="34" font-family="system-ui,-apple-system,sans-serif" font-weight="600" font-size="7.5" fill="rgba(255,255,255,0.5)" text-anchor="end">v4.8.0</text>
+        <text x="198" y="34" font-family="system-ui,-apple-system,sans-serif" font-weight="600" font-size="7.5" fill="rgba(255,255,255,0.5)" text-anchor="end">v4.8</text>
       </svg>
       <div class="sub" id="app-user-info"></div>
     </div>
@@ -1507,7 +1507,7 @@ const T = {
     selectStoreFrst:'请先选择门店',
     latLngRequired:'请输入经纬度坐标',
     zoneSaved:'区域已保存。',
-    // ── Additional zh keys v4.8.0 ──
+    // ── Additional zh keys v4.8 ──
     totalSalesLabel:'总销售额',storeLabel:'门店',dateLabel2:'日期',
     updateSalesBtn:'📝 更新销售',confirmDailyBtn:'📎 确认每日销售 (上传收据)',
     requestApprovalBtn:'📋 申请结算审批',
@@ -2871,7 +2871,7 @@ function shareMonthlyWhatsApp(month){
   lines.push('─────────────────────');
   lines.push('*'+(EN?'GRAND TOTAL: RM ':'JUMLAH KESELURUHAN: RM ')+grandTotal.toFixed(2)+'*');
   lines.push('');
-  lines.push('_Daily Sales Reporter v4.8.0_');
+  lines.push('_Daily Sales Reporter v4.8_');
   var msg=lines.join('\n');
   // WhatsApp - check if recipient phone in email field
   var s2=getReportSettings();
@@ -4851,8 +4851,9 @@ async function submitAttendance(type){
       id:String(Date.now()),username:currentUser.username,pin:currentUser.pin,
       name:currentUser.name,role:currentUser.role,store:currentUser.store,
       type:type,status:'pending',dateKey:dateKeyUTC8(),datetime:nowUTC8(),
-      lat:loc.lat,lng:loc.lng,accuracy:loc.accuracy,source:loc.source,
-      remark:remark,accuracy:loc.accuracy,gpsSource:loc.source,deviceId:getDeviceId(),deviceName:getDeviceName(),
+      lat:loc.lat,lng:loc.lng,accuracy:loc.accuracy,
+      source:loc.source,gpsSource:loc.source,
+      remark:remark,deviceId:getDeviceId(),deviceName:getDeviceName(),
       userAgent:navigator.userAgent||'',platform:navigator.platform||''
     };
     gasPost(getCompanyForStore(record.store||currentUser.store),Object.assign({action:'submitAttendance'},record))
@@ -4891,21 +4892,23 @@ async function submitAttendance(type){
     renderAttendanceTab();
     setTimeout(function(){triggerSyncRefresh();},1500);
   }catch(e){
-    // Location failed — still save the record
+    // Location failed — save record without GPS coords
     var errRecord={
       id:String(Date.now()),username:currentUser.username,pin:currentUser.pin,
       name:currentUser.name,role:currentUser.role,store:currentUser.store,
       type:type,status:'present',dateKey:dateKeyUTC8(),datetime:nowUTC8(),
-      lat:0,lng:0,accuracy:9999,source:'location_error',
-      remark:remark,accuracy:loc.accuracy,gpsSource:loc.source,deviceId:getDeviceId(),deviceName:getDeviceName(),
+      lat:0,lng:0,accuracy:9999,source:'location_error',gpsSource:'location_error',
+      remark:remark,deviceId:getDeviceId(),deviceName:getDeviceName(),
       userAgent:navigator.userAgent||'',platform:navigator.platform||''
     };
-    fetch(gasUrlForStore(currentUser.store),{method:'POST',mode:'no-cors',cache:'no-cache',
-      headers:{'Content-Type':'text/plain'},
-      body:JSON.stringify(Object.assign({action:'submitAttendance'},errRecord))
-    }).catch(function(){});
+    var _errUrl=gasUrlFor(getCompanyForStore(currentUser.store))||WEB_APP_URL;
+    if(_errUrl&&_errUrl.length>20){
+      fetch(_errUrl,{method:'POST',mode:'no-cors',cache:'no-cache',
+        headers:{'Content-Type':'text/plain'},
+        body:JSON.stringify(Object.assign({action:'submitAttendance'},errRecord))
+      }).catch(function(){});
+    }
     _attSession.push(errRecord);
-
     showAttendanceResult('success',label+' Saved',
       (ZH?'考勤已记录（位置不可用）':'Attendance saved (location unavailable)'),getDeviceName());
     renderAttendanceTab();
