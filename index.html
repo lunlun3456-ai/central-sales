@@ -6897,11 +6897,11 @@ async function adminClearDeviceBind(username){
     if(String(b[k]).toLowerCase()===String(username).toLowerCase()) delete b[k];
   });
   saveData('_device_bindings',b);
-  // 2. Tell GAS: set deviceReset='pending' in Users sheet + delete UserDevices rows
-  //    Staff phone will self-clear localStorage binding on next login
+  // POST to Central GAS — device reset flag lives in Central DB Users sheet
+  var _resetUrl=(CENTRAL_GAS_URL&&!CENTRAL_GAS_URL.includes('PASTE_'))?CENTRAL_GAS_URL:WEB_APP_URL;
   showToast(EN?'Sending reset...':'Menghantar reset...','pending');
   try{
-    await fetch(gasUrlFor(_activeCompany)||WEB_APP_URL,{method:'POST',mode:'no-cors',cache:'no-cache',
+    await fetch(_resetUrl,{method:'POST',mode:'no-cors',cache:'no-cache',
       headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'clearDeviceBinding',username:username,
         clearedBy:currentUser.name,clearedAt:nowUTC8()})});
