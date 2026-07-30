@@ -762,7 +762,7 @@
         <!-- version -->
         <text x="314" y="216"
           font-family="system-ui,-apple-system,sans-serif"
-          font-weight="600" font-size="9" fill="#cbd5e1" text-anchor="end">v4.8.0</text>
+          font-weight="600" font-size="9" fill="#cbd5e1" text-anchor="end">v4.8</text>
 
       </svg>
     </div><!-- /login-logo -->
@@ -827,7 +827,7 @@
         <!-- by ki -->
         <text x="34" y="28" font-family="system-ui,-apple-system,sans-serif" font-weight="700" font-size="9" fill="rgba(255,255,255,0.45)" font-style="italic">by ki</text>
         <!-- version -->
-        <text x="198" y="34" font-family="system-ui,-apple-system,sans-serif" font-weight="600" font-size="7.5" fill="rgba(255,255,255,0.5)" text-anchor="end">v4.8.0</text>
+        <text x="198" y="34" font-family="system-ui,-apple-system,sans-serif" font-weight="600" font-size="7.5" fill="rgba(255,255,255,0.5)" text-anchor="end">v4.8</text>
       </svg>
       <div class="sub" id="app-user-info"></div>
     </div>
@@ -1216,10 +1216,24 @@ function gasUrlFor(company){
 // POST to a specific company's GAS — for cross-company admin edits
 function gasPost(company,payload){
   var url=gasUrlFor(company);
-  if(!url||url.length<20) return Promise.reject(new Error('No GAS URL for '+company));
+  // Fallback chain: company URL → WEB_APP_URL → nothing
+  if(!url||url.length<20) url=WEB_APP_URL;
+  if(!url||url.length<20){
+    showToast('⚠️ No GAS URL for '+company+'. Set gasUrl in Central DB → Companies sheet.','error');
+    return Promise.reject(new Error('No GAS URL for '+company));
+  }
   return fetch(url,{method:'POST',mode:'no-cors',cache:'no-cache',
     headers:{'Content-Type':'text/plain'},
     body:JSON.stringify(payload)});
+}
+
+// Get GAS URL for attendance — uses WEB_APP_URL as ultimate fallback
+// WEB_APP_URL is set to active company at login, so this always works
+function gasUrlForAttendance(store){
+  var co=getCompanyForStore(store);
+  var url=gasUrlFor(co);
+  if(!url||url.length<20) url=WEB_APP_URL;
+  return url;
 }
 var _attSession = []; // in-memory today's records, never wiped by sync
 
@@ -1507,7 +1521,7 @@ const T = {
     selectStoreFrst:'请先选择门店',
     latLngRequired:'请输入经纬度坐标',
     zoneSaved:'区域已保存。',
-    // ── Additional zh keys v4.8.0 ──
+    // ── Additional zh keys v4.8 ──
     totalSalesLabel:'总销售额',storeLabel:'门店',dateLabel2:'日期',
     updateSalesBtn:'📝 更新销售',confirmDailyBtn:'📎 确认每日销售 (上传收据)',
     requestApprovalBtn:'📋 申请结算审批',
@@ -1568,11 +1582,12 @@ function updateTopBar() {
   if(!currentUser) return;
   var isDesktop=document.body.classList.contains('desktop-mode');
   var compTag=_activeCompany?' · '+_activeCompany:'';
-  // In desktop mode, show shorter text to avoid overflow
   var text=isDesktop
     ? currentUser.name+' | '+t(currentUser.role)+compTag
     : currentUser.name+' | '+currentUser.store+' | '+t(currentUser.role)+compTag;
   document.getElementById('app-user-info').textContent=text;
+
+  // Show desktop toggle for admin
   var btn=document.getElementById('desktop-toggle');
   if(btn){
     var isAdmin=currentUser.role==='admin';
@@ -1583,6 +1598,23 @@ function updateTopBar() {
       document.body.classList.add('desktop-mode');
       btn.textContent='📱';
       _syncDesktopTabClass();
+    }
+  }
+
+  // Warn admin about unconfigured company GAS URLs
+  if(currentUser.role==='admin'&&_centralUser&&_centralUser.companies){
+    var missing=Object.keys(_centralUser.companies).filter(function(co){
+      var u=_centralUser.companies[co]||'';
+      return !u||u.includes('PASTE_')||u.length<20;
+    });
+    if(missing.length>0){
+      // Show once per session
+      if(!window._gasUrlWarnShown){
+        window._gasUrlWarnShown=true;
+        setTimeout(function(){
+          showToast('⚠️ '+missing.length+' company GAS URL(s) not set: '+missing.join(', ')+'. Set in Central DB → Companies sheet.','error');
+        },2000);
+      }
     }
   }
 }
@@ -1662,7 +1694,9 @@ async function submitRegisterRequest(){
 function gasGet(action) {
   return new Promise((resolve, reject) => {
     var _url=(gasUrlFor(_activeCompany)||WEB_APP_URL);
-    if(!_url||_url.length<10){reject(new Error('No GAS URL for active company'));return;}
+    // Always fall back to WEB_APP_URL — it's set to active company at login
+    if(!_url||_url.length<10) _url=WEB_APP_URL;
+    if(!_url||_url.length<10){reject(new Error('No GAS URL configured'));return;}
     const url = _url + '?action=' + action + '&t=' + Date.now();
     fetch(url, { method:'GET', redirect:'follow', credentials:'omit', cache:'no-cache' })
       .then(r => {
@@ -2893,7 +2927,7 @@ function shareMonthlyWhatsApp(month){
   lines.push('─────────────────────');
   lines.push('*'+(EN?'GRAND TOTAL: RM ':'JUMLAH KESELURUHAN: RM ')+grandTotal.toFixed(2)+'*');
   lines.push('');
-  lines.push('_Daily Sales Reporter v4.8.0_');
+  lines.push('_Daily Sales Reporter v4.8_');
   var msg=lines.join('\n');
   // WhatsApp - check if recipient phone in email field
   var s2=getReportSettings();
@@ -4878,8 +4912,12 @@ async function submitAttendance(type){
       remark:remark,deviceId:getDeviceId(),deviceName:getDeviceName(),
       userAgent:navigator.userAgent||'',platform:navigator.platform||''
     };
-    gasPost(getCompanyForStore(record.store||currentUser.store),Object.assign({action:'submitAttendance'},record))
-      .catch(function(){});
+    // Route to correct company GAS — gasUrlForAttendance always has fallback
+    var _attUrl=gasUrlForAttendance(record.store);
+    fetch(_attUrl,{method:'POST',mode:'no-cors',cache:'no-cache',
+      headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify(Object.assign({action:'submitAttendance'},record))
+    }).catch(function(){});
     var zone=nearestLocalZone(record.store,record.lat,record.lng);
     // iOS GPS can have 100-500m error — add accuracy as buffer to allowed radius
     var gpsBuffer=Math.max(0,(loc.accuracy||0)-20);
@@ -4923,7 +4961,7 @@ async function submitAttendance(type){
       remark:remark,deviceId:getDeviceId(),deviceName:getDeviceName(),
       userAgent:navigator.userAgent||'',platform:navigator.platform||''
     };
-    var _errUrl=gasUrlFor(getCompanyForStore(currentUser.store))||WEB_APP_URL;
+    var _errUrl=gasUrlForAttendance(currentUser.store);
     if(_errUrl&&_errUrl.length>20){
       fetch(_errUrl,{method:'POST',mode:'no-cors',cache:'no-cache',
         headers:{'Content-Type':'text/plain'},
