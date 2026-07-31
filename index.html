@@ -762,7 +762,7 @@
         <!-- version -->
         <text x="314" y="216"
           font-family="system-ui,-apple-system,sans-serif"
-          font-weight="600" font-size="9" fill="#cbd5e1" text-anchor="end">v4.8.0</text>
+          font-weight="600" font-size="9" fill="#cbd5e1" text-anchor="end">v4.8</text>
 
       </svg>
     </div><!-- /login-logo -->
@@ -827,7 +827,7 @@
         <!-- by ki -->
         <text x="34" y="28" font-family="system-ui,-apple-system,sans-serif" font-weight="700" font-size="9" fill="rgba(255,255,255,0.45)" font-style="italic">by ki</text>
         <!-- version -->
-        <text x="198" y="34" font-family="system-ui,-apple-system,sans-serif" font-weight="600" font-size="7.5" fill="rgba(255,255,255,0.5)" text-anchor="end">v4.8.0</text>
+        <text x="198" y="34" font-family="system-ui,-apple-system,sans-serif" font-weight="600" font-size="7.5" fill="rgba(255,255,255,0.5)" text-anchor="end">v4.8</text>
       </svg>
       <div class="sub" id="app-user-info"></div>
     </div>
@@ -1521,7 +1521,7 @@ const T = {
     selectStoreFrst:'请先选择门店',
     latLngRequired:'请输入经纬度坐标',
     zoneSaved:'区域已保存。',
-    // ── Additional zh keys v4.8.0 ──
+    // ── Additional zh keys v4.8 ──
     totalSalesLabel:'总销售额',storeLabel:'门店',dateLabel2:'日期',
     updateSalesBtn:'📝 更新销售',confirmDailyBtn:'📎 确认每日销售 (上传收据)',
     requestApprovalBtn:'📋 申请结算审批',
@@ -2927,7 +2927,7 @@ function shareMonthlyWhatsApp(month){
   lines.push('─────────────────────');
   lines.push('*'+(EN?'GRAND TOTAL: RM ':'JUMLAH KESELURUHAN: RM ')+grandTotal.toFixed(2)+'*');
   lines.push('');
-  lines.push('_Daily Sales Reporter v4.8.0_');
+  lines.push('_Daily Sales Reporter v4.8_');
   var msg=lines.join('\n');
   // WhatsApp - check if recipient phone in email field
   var s2=getReportSettings();
@@ -3050,14 +3050,16 @@ async function triggerSyncRefresh() {
 }
 
 async function fetchLiveUsers(forceRefresh) {
-  // Users live in Central DB — fetch from Central GAS
   var centralUrl=(CENTRAL_GAS_URL&&!CENTRAL_GAS_URL.includes('PASTE_'))?CENTRAL_GAS_URL:'';
   if(centralUrl){
     try{
-      var resp=await fetchWithTimeout(centralUrl+'?action=getUsers&t='+Date.now(),{method:'GET',cache:'no-cache'},8000);
+      // Use getCentralData — gets users + companies + leaves in ONE call
+      var resp=await fetchWithTimeout(centralUrl+'?action=getCentralData&t='+Date.now(),
+        {method:'GET',cache:'no-cache'},10000);
       var data=await resp.json();
+
+      // Process users
       if(data&&Array.isArray(data.users)){
-        // Convert array to keyed object by username
         var userMap={};
         data.users.forEach(function(u){
           if(u.username) userMap[u.username.toLowerCase()]=u;
@@ -3067,19 +3069,52 @@ async function fetchLiveUsers(forceRefresh) {
           saveData('cached_users',userMap);
         }
       }
-    }catch(e){ console.warn('Central users fetch failed:',e.message); }
+
+      // Process leaves — update local cache
+      if(data&&Array.isArray(data.leaves)){
+        saveData('cached_leaves',data.leaves);
+      }
+
+      // Update companies map if provided
+      if(data&&Array.isArray(data.companies)&&_centralUser){
+        data.companies.forEach(function(c){
+          if(c.companyName&&_centralUser.companies!==undefined){
+            _centralUser.companies[c.companyName]=String(c.gasUrl||'');
+          }
+        });
+      }
+    }catch(e){
+      // Fallback to getUsers only
+      try{
+        var resp2=await fetchWithTimeout(centralUrl+'?action=getUsers&t='+Date.now(),
+          {method:'GET',cache:'no-cache'},8000);
+        var data2=await resp2.json();
+        if(data2&&Array.isArray(data2.users)){
+          var userMap2={};
+          data2.users.forEach(function(u){
+            if(u.username) userMap2[u.username.toLowerCase()]=u;
+          });
+          if(Object.keys(userMap2).length>0){
+            cachedUsers=userMap2;
+            saveData('cached_users',userMap2);
+          }
+        }
+      }catch(e2){}
+    }
   }
-  // Also fetch from company GAS for company-specific data (permissions etc)
+
+  // Sync permissions from active company GAS
   if(WEB_APP_URL&&!WEB_APP_URL.includes('PASTE_')&&WEB_APP_URL.length>20){
     try{
-      const permResp=await gasGet('getPermissions');
+      var permResp=await gasGet('getPermissions');
       if(permResp&&permResp.permissions){
         savePerms(permResp.permissions);
         if(currentUser) applyPermissionsToNav();
       }
     }catch(e){}
   }
-  // Fall back to localStorage cache
+
+  // Fall back to localStorage cache if nothing loaded
   if(Object.keys(cachedUsers).length===0){
     var cached=loadData('cached_users',{});
     if(Object.keys(cached).length>0) cachedUsers=cached;
