@@ -3034,7 +3034,7 @@ async function triggerSyncRefresh() {
       if(allBackups.length>0) saveBackups(allBackups);
 
       applyPermissionsToNav();
-      renderCurrentTab();
+      if(currentTab!=='admin') renderCurrentTab(); // admin re-renders itself after fetchAdminData
       checkAllStoresSubmitted();
       showToast(lang==='zh'?'全公司同步完成 ✓':'All companies synced ✓','success');
     }catch(e){
@@ -3056,7 +3056,7 @@ async function triggerSyncRefresh() {
 
     if(newSales!==null){
       saveSales(newSales);
-      renderCurrentTab();
+      if(currentTab!=='admin') renderCurrentTab(); // admin re-renders itself after fetchAdminData
       checkAllStoresSubmitted();
       showToast(lang==='zh'?'云端同步成功 ✓':'Synced from Cloud ✓','success');
       try{
@@ -3070,7 +3070,8 @@ async function triggerSyncRefresh() {
             _setServerAtt(appJson.attendance, _attFetchGen);
             saveData('attendance_records',[]);
             if(currentTab==='attendance') renderAttendanceTab();
-            if(currentTab==='admin') { var el=document.getElementById('tab-admin'); if(el&&!el.innerHTML.includes('spinner-wrap')) if(!_adminRendering) renderAdminTab(); }
+            // Do NOT call renderAdminTab here — it causes recursion
+            // Admin attendance updates via fetchAdminData which is called from renderAdminTab directly
           }
           if(Array.isArray(appJson.workZones))     saveWorkZones(appJson.workZones);
           if(Array.isArray(appJson.workSchedules)) saveWorkSchedules(appJson.workSchedules);
@@ -3082,7 +3083,7 @@ async function triggerSyncRefresh() {
       }catch(e3){}
     } else {
       saveSales([]);
-      renderCurrentTab();
+      if(currentTab!=='admin') renderCurrentTab(); // admin re-renders itself after fetchAdminData
       showToast('No sales data on server yet','success');
     }
   }catch(e){
@@ -5966,13 +5967,12 @@ async function renderAdminTab() {
 
     if(hasPerm('role_perm')) renderPermissionsPanel();
     if(hasPerm('monthly_report')) renderMonthlyReportPanel();
-    if(currentUser.role==='admin'&&(hasPerm('work_zone')||hasPerm('work_schedule'))){
+    // Pre-load zone for first store (no full sync — avoids re-render loop)
+    if(currentUser.role==='admin'&&hasPerm('work_zone')){
       setTimeout(function(){
-        syncAllCompanyZonesAndSchedules().catch(function(){});
-        // Pre-load zone for first store in the form
         var fs=document.getElementById('zone-store');
         if(fs&&fs.value&&typeof loadZoneForStore==='function') loadZoneForStore(fs.value);
-      },1500);
+      },500);
     }
   }catch(err){
     document.getElementById('tab-admin').innerHTML=`<div class="card" style="color:#dc2626;padding:20px">Admin tab error: ${err.message}</div>`;
