@@ -762,7 +762,7 @@
         <!-- version -->
         <text x="314" y="216"
           font-family="system-ui,-apple-system,sans-serif"
-          font-weight="600" font-size="9" fill="#cbd5e1" text-anchor="end">v4.8.0</text>
+          font-weight="600" font-size="9" fill="#cbd5e1" text-anchor="end">v4.8</text>
 
       </svg>
     </div><!-- /login-logo -->
@@ -827,7 +827,7 @@
         <!-- by ki -->
         <text x="34" y="28" font-family="system-ui,-apple-system,sans-serif" font-weight="700" font-size="9" fill="rgba(255,255,255,0.45)" font-style="italic">by ki</text>
         <!-- version -->
-        <text x="198" y="34" font-family="system-ui,-apple-system,sans-serif" font-weight="600" font-size="7.5" fill="rgba(255,255,255,0.5)" text-anchor="end">v4.8.0</text>
+        <text x="198" y="34" font-family="system-ui,-apple-system,sans-serif" font-weight="600" font-size="7.5" fill="rgba(255,255,255,0.5)" text-anchor="end">v4.8</text>
       </svg>
       <div class="sub" id="app-user-info"></div>
     </div>
@@ -1197,20 +1197,36 @@ var _centralUser   = null; // full user profile returned by Central GAS
 function _allowedCompanies(){ return _centralUser?(_centralUser.allowedCompanies||[]):[]; }
 
 function setActiveCompany(name){
-  if(!_centralUser||!_centralUser.companies) return;
-  var url=_centralUser.companies[name]||'';
+  if(!_centralUser) return;
+  if(!_centralUser.companies) _centralUser.companies={};
+  var url=String(_centralUser.companies[name]||'').trim();
+  if(!url||url.includes('PASTE_')) url='';
   _activeCompany=name;
-  WEB_APP_URL=url.includes('PASTE_')?'':url;
+  // WEB_APP_URL is the hardcoded fallback for IS LEATHER (set at top of file)
+  // Keep it if companies map has no URL for this company
+  if(url) WEB_APP_URL=url;
+  // Always register this company → current WEB_APP_URL so sync can find it
+  if(WEB_APP_URL&&WEB_APP_URL.length>20&&!WEB_APP_URL.includes('PASTE_')){
+    _centralUser.companies[name]=WEB_APP_URL;
+  }
   localStorage.setItem('active_company',name);
-  if(!WEB_APP_URL) showToast('⚠️ Company GAS URL not set. Add it in Central DB Companies sheet.','error');
+  if(!WEB_APP_URL||WEB_APP_URL.length<20){
+    showToast('⚠️ GAS URL not set for '+name+'. Add it in Central DB → Companies sheet.','error');
+  }
 }
 
 // Get GAS URL for a specific company name
-// Admin uses this to route edits to the correct company's spreadsheet
+// Falls back to WEB_APP_URL (hardcoded IS LEATHER URL) if company not in map
 function gasUrlFor(company){
-  if(!company||!_centralUser||!_centralUser.companies) return WEB_APP_URL;
-  var url=String(_centralUser.companies[company]||'');
-  return (!url||url.includes('PASTE_'))?WEB_APP_URL:url;
+  if(!company) return WEB_APP_URL;
+  // Check _centralUser.companies first
+  if(_centralUser&&_centralUser.companies){
+    var url=String(_centralUser.companies[company]||'').trim();
+    if(url&&!url.includes('PASTE_')&&url.length>20) return url;
+  }
+  // If this is the active company, WEB_APP_URL IS the URL for it
+  if(company===_activeCompany&&WEB_APP_URL&&WEB_APP_URL.length>20) return WEB_APP_URL;
+  return WEB_APP_URL; // final fallback
 }
 
 // POST to a specific company's GAS — for cross-company admin edits
@@ -1521,7 +1537,7 @@ const T = {
     selectStoreFrst:'请先选择门店',
     latLngRequired:'请输入经纬度坐标',
     zoneSaved:'区域已保存。',
-    // ── Additional zh keys v4.8.0 ──
+    // ── Additional zh keys v4.8 ──
     totalSalesLabel:'总销售额',storeLabel:'门店',dateLabel2:'日期',
     updateSalesBtn:'📝 更新销售',confirmDailyBtn:'📎 确认每日销售 (上传收据)',
     requestApprovalBtn:'📋 申请结算审批',
@@ -2936,7 +2952,7 @@ function shareMonthlyWhatsApp(month){
   lines.push('─────────────────────');
   lines.push('*'+(EN?'GRAND TOTAL: RM ':'JUMLAH KESELURUHAN: RM ')+grandTotal.toFixed(2)+'*');
   lines.push('');
-  lines.push('_Daily Sales Reporter v4.8.0_');
+  lines.push('_Daily Sales Reporter v4.8_');
   var msg=lines.join('\n');
   // WhatsApp - check if recipient phone in email field
   var s2=getReportSettings();
@@ -3217,11 +3233,15 @@ async function doLogin(){
     // Admin can switch company from inside the app (Me tab)
     // For all other roles: if only 1 company → enter directly, else show selector
     if(cr.role==='admin'||companies.length===1){
-      // Use last selected company if available, else first company
       var lastUsed=localStorage.getItem('active_company')||'';
       var pick=companies.indexOf(lastUsed)>=0?lastUsed:companies[0];
       _activeCompany=pick;
-      WEB_APP_URL=String(companyMap[pick]||'').indexOf('PASTE_')>=0?'':String(companyMap[pick]||'');
+      var pickUrl=String(companyMap[pick]||'').trim();
+      // Update WEB_APP_URL from companyMap — keep hardcoded if map is empty
+      if(pickUrl&&!pickUrl.includes('PASTE_')&&pickUrl.length>20) WEB_APP_URL=pickUrl;
+      // Register WEB_APP_URL back so gasUrlFor('IS LEATHER') always works
+      if(!cr.companies) cr.companies={};
+      if(WEB_APP_URL&&WEB_APP_URL.length>20) cr.companies[pick]=WEB_APP_URL;
       localStorage.setItem('active_company',pick);
       _enterApp(cr,pin);return;
     }
@@ -3350,12 +3370,48 @@ function _enterApp(cr,pin){
 async function _doAppLogin(userMatch){
   try{
     currentUser=Object.assign({},userMatch);
+
+    // ── Device reset check ───────────────────────────────────────
+    // If admin flagged deviceReset:'pending' in Central DB,
+    // clear this device's stored binding so staff can check in freely
+    if(String(userMatch.deviceReset||'').toLowerCase()==='pending'){
+      // Clear device binding from localStorage
+      try{
+        localStorage.removeItem('device_id_'+currentUser.username);
+        localStorage.removeItem('device_binding_'+currentUser.username);
+        localStorage.removeItem('att_device_'+currentUser.username);
+        // Also clear the generic device store
+        var devStore=loadData('user_devices',{});
+        delete devStore[currentUser.username];
+        saveData('user_devices',devStore);
+      }catch(e){}
+      // Tell Central GAS to clear the flag
+      var _centralUrl2=CENTRAL_GAS_URL&&!CENTRAL_GAS_URL.includes('PASTE_')?CENTRAL_GAS_URL:'';
+      if(_centralUrl2){
+        fetch(_centralUrl2,{method:'POST',mode:'no-cors',cache:'no-cache',
+          headers:{'Content-Type':'text/plain'},
+          body:JSON.stringify({action:'confirmDeviceReset',
+            username:currentUser.username,clearedAt:nowUTC8()})
+        }).catch(function(){});
+      }
+      // Also tell company GAS to clear UserDevices rows
+      var _coUrl=gasUrlForAttendance(currentUser.store);
+      if(_coUrl&&_coUrl.length>20){
+        fetch(_coUrl,{method:'POST',mode:'no-cors',cache:'no-cache',
+          headers:{'Content-Type':'text/plain'},
+          body:JSON.stringify({action:'clearDeviceBinding',
+            username:currentUser.username,clearedBy:'system_auto_reset'})
+        }).catch(function(){});
+      }
+      showToast('📱 Device reset — you can now check in normally','success');
+    }
+    // ────────────────────────────────────────────────────────────
+
     document.getElementById('login-screen').classList.remove('active');
     document.getElementById('app-screen').classList.add('active');
-    // updateTopBar AFTER screen switch so desktop-toggle button is in visible DOM
-    try{updateTopBar();}catch(e){console.warn('updateTopBar:',e);}
-    try{updateNavLabels();}catch(e){console.warn('updateNavLabels:',e);}
-    try{applyPermissionsToNav();}catch(e){console.warn('applyPermissionsToNav:',e);}
+    try{updateTopBar();}catch(e){}
+    try{updateNavLabels();}catch(e){}
+    try{applyPermissionsToNav();}catch(e){}
     var isBoss=currentUser.role==='boss';
     var startTab=isBoss?'summary':'submit';
     currentTab=startTab;
@@ -3366,19 +3422,17 @@ async function _doAppLogin(userMatch){
       var el=document.getElementById('tab-'+tt);
       if(el) el.style.display=(tt===startTab?'block':'none');
     });
-    try{if(isBoss) renderSummaryTab(); else renderSubmitTab();}catch(e){console.warn('renderTab:',e);}
+    try{if(isBoss) renderSummaryTab(); else renderSubmitTab();}catch(e){}
     try{syncMalaysiaTime();}catch(e){}
     try{startNotifScheduler();}catch(e){}
     try{saveData('attendance_records',[]);_serverAtt=[];_serverAttLoaded=false;fetchServerAttendance();}catch(e){}
-    // Fetch leave records from Central DB spreadsheet
-    try{ fetchLeavesFromCentral(); }catch(e){}
+    try{fetchLeavesFromCentral();}catch(e){}
     if(WEB_APP_URL&&WEB_APP_URL.length>20){
       try{recordLoginDevice();}catch(e){}
       setTimeout(function(){try{triggerSyncRefresh();}catch(e){}},1500);
     }
   }catch(err){
     showToast('App error: '+err.message,'error');
-    console.error('_doAppLogin error:',err);
   }
 }
 
