@@ -762,7 +762,7 @@
         <!-- version -->
         <text x="314" y="216"
           font-family="system-ui,-apple-system,sans-serif"
-          font-weight="600" font-size="9" fill="#cbd5e1" text-anchor="end">v4.8</text>
+          font-weight="600" font-size="9" fill="#cbd5e1" text-anchor="end">V 4.8</text>
 
       </svg>
     </div><!-- /login-logo -->
@@ -827,7 +827,7 @@
         <!-- by ki -->
         <text x="34" y="28" font-family="system-ui,-apple-system,sans-serif" font-weight="700" font-size="9" fill="rgba(255,255,255,0.45)" font-style="italic">by ki</text>
         <!-- version -->
-        <text x="198" y="34" font-family="system-ui,-apple-system,sans-serif" font-weight="600" font-size="7.5" fill="rgba(255,255,255,0.5)" text-anchor="end">v4.8</text>
+        <text x="198" y="34" font-family="system-ui,-apple-system,sans-serif" font-weight="600" font-size="7.5" fill="rgba(255,255,255,0.5)" text-anchor="end">V 4.8</text>
       </svg>
       <div class="sub" id="app-user-info"></div>
     </div>
@@ -1537,7 +1537,7 @@ const T = {
     selectStoreFrst:'请先选择门店',
     latLngRequired:'请输入经纬度坐标',
     zoneSaved:'区域已保存。',
-    // ── Additional zh keys v4.8 ──
+    // ── Additional zh keys V 4.8 ──
     totalSalesLabel:'总销售额',storeLabel:'门店',dateLabel2:'日期',
     updateSalesBtn:'📝 更新销售',confirmDailyBtn:'📎 确认每日销售 (上传收据)',
     requestApprovalBtn:'📋 申请结算审批',
@@ -2294,55 +2294,53 @@ function applyPermissionsToNav(){
 // ── Server-first Attendance (no localStorage) ──────────────────────────────
 var _serverAtt = [];   // fetched from GAS, in-memory only
 var _serverAttLoaded = false;
+var _attFetchGen = 0; // increments each fetch — only latest fetch may write _serverAtt
+
+// Safe setter — only writes if this fetch is still the latest
+function _setServerAtt(arr, myGen){
+  if(myGen < _attFetchGen) return; // stale fetch — discard
+  _setServerAtt(arr, _attFetchGen);
+  _serverAttLoaded = true;
+  saveData('attendance_records', []);
+}
 
 async function fetchServerAttendance(){
-  // For admin: fetch attendance from ALL company GAS endpoints
+  // Claim this generation — any older fetches that finish later are discarded
+  var myGen = ++_attFetchGen;
+
+  // Build URL list — admin gets ALL companies, others get active company only
+  var urlMap={};
   if(currentUser&&currentUser.role==='admin'){
     var companies=(_centralUser&&_centralUser.companies)||{};
-    // Deduplicate URLs — some companies may share a GAS
-    var urlMap={};
     Object.keys(companies).forEach(function(co){
       var url=String(companies[co]||'').trim();
       if(url&&!url.includes('PASTE_')&&url.length>20) urlMap[url]=co;
     });
-    // Always include WEB_APP_URL (active company, always set at login)
-    if(WEB_APP_URL&&WEB_APP_URL.length>20&&!WEB_APP_URL.includes('PASTE_')){
-      if(!urlMap[WEB_APP_URL]) urlMap[WEB_APP_URL]=_activeCompany||'Company';
-    }
-    var urlList=Object.keys(urlMap).map(function(url){return {url:url,co:urlMap[url]};});
-    if(urlList.length>0){
-      var allAtt=[];
-      await Promise.all(urlList.map(async function(e){
-        try{
-          var resp=await fetchWithTimeout(e.url+'?action=getAttendance&t='+Date.now(),
-            {method:'GET',cache:'no-cache'},10000);
-          var r=await resp.json();
-          var arr=(r&&Array.isArray(r.attendance))?r.attendance:(Array.isArray(r)?r:[]);
-          arr.forEach(function(a){a._company=e.co;allAtt.push(a);});
-        }catch(e2){}
-      }));
-      if(allAtt.length>0){
-        _serverAtt=allAtt; _serverAttLoaded=true; saveData('attendance_records',[]);
-      }
-    }
-    return;
+  }
+  // Always include WEB_APP_URL (hardcoded active company — IS LEATHER or current)
+  if(WEB_APP_URL&&WEB_APP_URL.length>20&&!WEB_APP_URL.includes('PASTE_')){
+    if(!urlMap[WEB_APP_URL]) urlMap[WEB_APP_URL]=_activeCompany||'Company';
   }
 
-  // Non-admin: fetch from active company only
-  try{
-    var r=await gasGet('getAttendance');
-    var arr=(r&&Array.isArray(r.attendance))?r.attendance
-           :(Array.isArray(r)?r:null);
-    if(!arr){
-      var r2=await gasGet('getAppData');
-      if(r2&&Array.isArray(r2.attendance)) arr=r2.attendance;
-    }
-    if(arr){
-      _serverAtt=arr;
-      _serverAttLoaded=true;
-      saveData('attendance_records',[]);
-    }
-  }catch(e){}
+  var urlList=Object.keys(urlMap).map(function(url){return {url:url,co:urlMap[url]};});
+  if(urlList.length===0) return;
+
+  var allAtt=[];
+  await Promise.all(urlList.map(async function(e){
+    try{
+      var resp=await fetchWithTimeout(
+        e.url+'?action=getAttendance&t='+Date.now(),
+        {method:'GET',cache:'no-cache'},10000);
+      var r=await resp.json();
+      var arr=(r&&Array.isArray(r.attendance))?r.attendance:(Array.isArray(r)?r:[]);
+      arr.forEach(function(a){a._company=e.co; allAtt.push(a);});
+    }catch(e2){}
+  }));
+
+  // Only write if we are still the latest fetch (not superseded)
+  if(myGen===_attFetchGen && allAtt.length>0){
+    _setServerAtt(allAtt, myGen);
+  }
 }
 
 function getAllAttendance(){
@@ -2952,7 +2950,7 @@ function shareMonthlyWhatsApp(month){
   lines.push('─────────────────────');
   lines.push('*'+(EN?'GRAND TOTAL: RM ':'JUMLAH KESELURUHAN: RM ')+grandTotal.toFixed(2)+'*');
   lines.push('');
-  lines.push('_Daily Sales Reporter v4.8_');
+  lines.push('_Daily Sales Reporter V 4.8_');
   var msg=lines.join('\n');
   // WhatsApp - check if recipient phone in email field
   var s2=getReportSettings();
@@ -3017,7 +3015,7 @@ async function triggerSyncRefresh() {
 
       // Save merged data
       if(allSales.length>0) saveSales(allSales);
-      if(allAtt.length>0){ _serverAtt=allAtt; _serverAttLoaded=true; saveData('attendance_records',[]); }
+      if(allAtt.length>0){ _setServerAtt(allAtt, _attFetchGen); }
       if(allSettlements.length>0) saveSettlementsData(allSettlements);
       if(allLocks.length>0) saveSettlementLocks(allLocks);
       if(allApprovals.length>0) saveApprovals(allApprovals);
@@ -3059,7 +3057,7 @@ async function triggerSyncRefresh() {
           if(Array.isArray(appJson.approvals))       saveApprovals(appJson.approvals);
           if(Array.isArray(appJson.settlements))     saveSettlementsData(appJson.settlements);
           if(Array.isArray(appJson.attendance)){
-            _serverAtt=appJson.attendance; _serverAttLoaded=true;
+            _setServerAtt(appJson.attendance, _attFetchGen);
             saveData('attendance_records',[]);
             if(currentTab==='attendance') renderAttendanceTab();
             if(currentTab==='admin') { var el=document.getElementById('tab-admin'); if(el&&!el.innerHTML.includes('spinner-wrap')) if(!_adminRendering) renderAdminTab(); }
@@ -5816,7 +5814,7 @@ async function fetchAdminData(){
     }catch(e2){}
   }));
 
-  if(allAtt.length>0)        {_serverAtt=allAtt;_serverAttLoaded=true;saveData('attendance_records',[]);}
+  if(allAtt.length>0)        {_setServerAtt(allAtt, _attFetchGen);}
   if(allApprovals.length>0)   saveApprovals(allApprovals);
   if(allSettlements.length>0) saveSettlementsData(allSettlements);
   if(allLocks.length>0)       saveSettlementLocks(allLocks);
@@ -5845,6 +5843,8 @@ async function renderAdminTab() {
     var _myRenderId=++_adminRenderSeq;
     document.getElementById('tab-admin').innerHTML=`<div class="spinner-wrap"><div class="spin"></div>${EN?'Loading...':'加载中...'}</div>`;
     // ONE fetch per company (not 3 separate calls) — much faster
+    // Increment gen so this is the authoritative fetch for attendance
+    _attFetchGen++;
     await Promise.all([fetchLiveUsers(true), fetchAdminData()]);
     if(_myRenderId!==_adminRenderSeq){ _adminRendering=false; return; }
 
