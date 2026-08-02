@@ -762,7 +762,7 @@
         <!-- version -->
         <text x="314" y="216"
           font-family="system-ui,-apple-system,sans-serif"
-          font-weight="600" font-size="9" fill="#cbd5e1" text-anchor="end">V 4.8</text>
+          font-weight="600" font-size="9" fill="#cbd5e1" text-anchor="end">V.4.8</text>
 
       </svg>
     </div><!-- /login-logo -->
@@ -827,7 +827,7 @@
         <!-- by ki -->
         <text x="34" y="28" font-family="system-ui,-apple-system,sans-serif" font-weight="700" font-size="9" fill="rgba(255,255,255,0.45)" font-style="italic">by ki</text>
         <!-- version -->
-        <text x="198" y="34" font-family="system-ui,-apple-system,sans-serif" font-weight="600" font-size="7.5" fill="rgba(255,255,255,0.5)" text-anchor="end">V 4.8</text>
+        <text x="198" y="34" font-family="system-ui,-apple-system,sans-serif" font-weight="600" font-size="7.5" fill="rgba(255,255,255,0.5)" text-anchor="end">V.4.8</text>
       </svg>
       <div class="sub" id="app-user-info"></div>
     </div>
@@ -1192,7 +1192,37 @@ function getAdminStores(){
 // For fallback (before Central GAS configured): paste your existing GAS URL here
 var WEB_APP_URL    = 'https://script.google.com/macros/s/AKfycbyXPbDgndv-K_6kyG8_EFocidQZ6wTnRnnrYkURLXOxvWBrhlFeyze1dM69itKFMhDz7A/exec';
 var _activeCompany = localStorage.getItem('active_company') || '';
-var _centralUser   = null; // full user profile returned by Central GAS
+var _centralUser   = null;
+
+// ── Company URL local storage helpers ────────────────────────
+// Admin can set each company's GAS URL from inside the app
+// These persist in localStorage and override empty Central DB entries
+function _getStoredCompanyUrls(){
+  try{ return JSON.parse(localStorage.getItem('company_gas_urls')||'{}'); }catch(e){ return {}; }
+}
+function _saveCompanyUrl(company, url){
+  var stored=_getStoredCompanyUrls();
+  if(url&&url.length>20&&!url.includes('PASTE_')) stored[company]=url;
+  else delete stored[company];
+  localStorage.setItem('company_gas_urls',JSON.stringify(stored));
+}
+function _mergeStoredUrls(){
+  // Merge locally-stored URLs into _centralUser.companies
+  // Locally stored URLs always win over empty Central DB entries
+  if(!_centralUser||!_centralUser.companies) return;
+  var stored=_getStoredCompanyUrls();
+  Object.keys(stored).forEach(function(co){
+    if(!_centralUser.companies[co]||_centralUser.companies[co].length<20){
+      _centralUser.companies[co]=stored[co];
+    }
+  });
+  // Also ensure WEB_APP_URL is registered for active company
+  if(WEB_APP_URL&&WEB_APP_URL.length>20&&_activeCompany){
+    if(!_centralUser.companies[_activeCompany]||_centralUser.companies[_activeCompany].length<20){
+      _centralUser.companies[_activeCompany]=WEB_APP_URL;
+    }
+  }
+}
 
 function _allowedCompanies(){ return _centralUser?(_centralUser.allowedCompanies||[]):[]; }
 
@@ -1537,7 +1567,7 @@ const T = {
     selectStoreFrst:'请先选择门店',
     latLngRequired:'请输入经纬度坐标',
     zoneSaved:'区域已保存。',
-    // ── Additional zh keys V 4.8 ──
+    // ── Additional zh keys V.4.8 ──
     totalSalesLabel:'总销售额',storeLabel:'门店',dateLabel2:'日期',
     updateSalesBtn:'📝 更新销售',confirmDailyBtn:'📎 确认每日销售 (上传收据)',
     requestApprovalBtn:'📋 申请结算审批',
@@ -2960,7 +2990,7 @@ function shareMonthlyWhatsApp(month){
   lines.push('─────────────────────');
   lines.push('*'+(EN?'GRAND TOTAL: RM ':'JUMLAH KESELURUHAN: RM ')+grandTotal.toFixed(2)+'*');
   lines.push('');
-  lines.push('_Daily Sales Reporter V 4.8_');
+  lines.push('_Daily Sales Reporter V.4.8_');
   var msg=lines.join('\n');
   // WhatsApp - check if recipient phone in email field
   var s2=getReportSettings();
@@ -3234,6 +3264,7 @@ async function doLogin(){
       return;
     }
     _centralUser=cr;
+    _mergeStoredUrls(); // inject locally stored URLs for companies with empty Central DB entries
     var companies=cr.allowedCompanies||[];
     var companyMap=cr.companies||{};
     if(companies.length===0){showToast('No companies assigned. Contact Admin.','error');return;}
@@ -5500,6 +5531,68 @@ function renderOperationsDashboard(){
     ${hasPerm('db_backup')?`<button class="btn secondary" style="margin-top:12px" onclick="createDatabaseBackup()">${ZH?'创建数据库备份':'Create Database Backup'}</button>`:''}
   </div>`;
 }
+// ── Company GAS URL Manager ─────────────────────────────────────────
+function renderCompanyUrlManager(){
+  var EN=lang==='en';
+  var stored=_getStoredCompanyUrls();
+  var rows=ALL_COMPANIES.map(function(co){
+    var url=(_centralUser&&_centralUser.companies&&_centralUser.companies[co])||stored[co]||'';
+    var hasUrl=url&&url.length>20&&!url.includes('PASTE_');
+    return '<div style="margin-bottom:10px">'
+      +'<label class="field-label">'+co+'</label>'
+      +'<div style="display:flex;gap:6px;align-items:center">'
+        +'<input type="text" id="co-url-'+co.replace(/[^a-zA-Z0-9]/g,'_')+'"'
+          +' value="'+(hasUrl?url:'')+'"'
+          +' placeholder="https://script.google.com/macros/s/.../exec"'
+          +' style="flex:1;font-size:11px;padding:8px 10px">'
+        +'<span style="font-size:16px;flex-shrink:0">'+(hasUrl?'✅':'❌')+'</span>'
+      +'</div>'
+    +'</div>';
+  }).join('');
+  return '<div class="card" style="margin-top:12px">'
+    +'<div class="card-title" style="margin-bottom:10px">🔗 Company GAS URLs</div>'
+    +'<div style="font-size:12px;color:var(--text2);margin-bottom:10px;background:var(--warning-lt);border-radius:8px;padding:8px;border:1px solid #fde68a">'
+      +'⚠️ Paste each company\'s Apps Script URL. Saved to this browser and Central DB.'
+    +'</div>'
+    +rows
+    +'<button class="btn success" onclick="saveAllCompanyUrls()" style="font-size:14px;margin-top:4px">💾 Save All URLs</button>'
+    +'<div id="co-url-saved" style="display:none;color:var(--success);font-size:12px;font-weight:700;margin-top:8px">✅ Saved! Syncing attendance...</div>'
+  +'</div>';
+}
+
+function saveAllCompanyUrls(){
+  var saved=0;
+  ALL_COMPANIES.forEach(function(co){
+    var input=document.getElementById('co-url-'+co.replace(/[^a-zA-Z0-9]/g,'_'));
+    if(!input) return;
+    var url=input.value.trim();
+    if(url&&url.length>20&&!url.includes('PASTE_')){
+      _saveCompanyUrl(co,url);
+      if(_centralUser&&_centralUser.companies) _centralUser.companies[co]=url;
+      // Save to Central DB
+      var cUrl=CENTRAL_GAS_URL&&!CENTRAL_GAS_URL.includes('PASTE_')?CENTRAL_GAS_URL:'';
+      if(cUrl){
+        fetch(cUrl,{method:'POST',mode:'no-cors',cache:'no-cache',
+          headers:{'Content-Type':'text/plain'},
+          body:JSON.stringify({action:'saveCompany',companyName:co,gasUrl:url,
+            updatedBy:currentUser.username,status:'active'})
+        }).catch(function(){});
+      }
+      saved++;
+    }
+  });
+  var msg=document.getElementById('co-url-saved');
+  if(msg) msg.style.display='block';
+  showToast('✅ '+saved+' company URL(s) saved — syncing...','success');
+  // Re-sync attendance with newly configured URLs
+  setTimeout(function(){
+    fetchServerAttendance().then(function(){
+      _renderAttendanceContent();
+      if(currentTab==='admin'&&!_adminRendering) renderAdminTab();
+    });
+  },600);
+}
+
 function approvalRowHtml(r){
   var ZH=lang==='zh';
   var typeLabel=r.type==='settlement'?(ZH?'结算确认':'Settlement')
@@ -5971,7 +6064,8 @@ async function renderAdminTab() {
       `:''}
       ${hasPerm('role_perm')?'<div id="perms-panel" style="margin-top:8px"></div>':''}
       ${hasPerm('monthly_report')?'<div id="monthly-report-panel"></div>':''}
-      <div id="zone-schedule-panel">${renderZoneScheduleTools(branches,users)}</div>`;
+      <div id="zone-schedule-panel">${renderZoneScheduleTools(branches,users)}</div>
+      ${currentUser.role==='admin'?renderCompanyUrlManager():''}`;
 
     if(hasPerm('role_perm')) renderPermissionsPanel();
     if(hasPerm('monthly_report')) renderMonthlyReportPanel();
