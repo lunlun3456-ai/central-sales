@@ -762,7 +762,7 @@
         <!-- version -->
         <text x="314" y="216"
           font-family="system-ui,-apple-system,sans-serif"
-          font-weight="600" font-size="9" fill="#cbd5e1" text-anchor="end">V 4.8.0</text>
+          font-weight="600" font-size="9" fill="#cbd5e1" text-anchor="end">V4.8</text>
 
       </svg>
     </div><!-- /login-logo -->
@@ -827,7 +827,7 @@
         <!-- by ki -->
         <text x="34" y="28" font-family="system-ui,-apple-system,sans-serif" font-weight="700" font-size="9" fill="rgba(255,255,255,0.45)" font-style="italic">by ki</text>
         <!-- version -->
-        <text x="198" y="34" font-family="system-ui,-apple-system,sans-serif" font-weight="600" font-size="7.5" fill="rgba(255,255,255,0.5)" text-anchor="end">V 4.8.0</text>
+        <text x="198" y="34" font-family="system-ui,-apple-system,sans-serif" font-weight="600" font-size="7.5" fill="rgba(255,255,255,0.5)" text-anchor="end">V4.8</text>
       </svg>
       <div class="sub" id="app-user-info"></div>
     </div>
@@ -1569,7 +1569,7 @@ const T = {
     selectStoreFrst:'请先选择门店',
     latLngRequired:'请输入经纬度坐标',
     zoneSaved:'区域已保存。',
-    // ── Additional zh keys V 4.8.0 ──
+    // ── Additional zh keys V4.8 ──
     totalSalesLabel:'总销售额',storeLabel:'门店',dateLabel2:'日期',
     updateSalesBtn:'📝 更新销售',confirmDailyBtn:'📎 确认每日销售 (上传收据)',
     requestApprovalBtn:'📋 申请结算审批',
@@ -1842,26 +1842,28 @@ function renderSettlementReports(){
 
 async function syncAttendanceNow(){
   showToast(lang==='en'?'Syncing attendance...':'Menyegerak kehadiran...','pending');
-  // Fetch fresh attendance from all companies
   await fetchServerAttendance();
-  // Re-render whichever tab needs it (never call renderAdminTab — it causes recursion)
+
   if(currentTab==='attendance'){
     _renderAttendanceContent();
   } else if(currentTab==='admin'){
-    // Just re-render the attendance section inside admin tab, not the whole tab
+    // Re-render the ops dashboard (Present/Absent/Approval counts)
+    var opsPanel=document.querySelector('[data-ops-panel]');
+    if(opsPanel) opsPanel.innerHTML=renderOperationsDashboard();
+
+    // Re-render attendance records list
     var attPanel=document.querySelector('[data-att-panel]');
     if(attPanel){
       var att=getAllAttendance().filter(function(r){
         return r.dateKey===attendanceDateFilter&&
                (attendanceStoreFilter==='all'||r.store===attendanceStoreFilter);
-      });
+      }).sort(function(a,b){return String(b.datetime).localeCompare(String(a.datetime));});
       attPanel.innerHTML=att.length
         ? att.map(attendanceRowHtml).join('')
-        : '<div style="font-size:13px;color:var(--text2);padding:10px 0">'+(lang==='en'?'No records for this date/store.':'Tiada rekod untuk tarikh/cawangan ini.')+'</div>';
+        : '<div style="font-size:13px;color:var(--text2);padding:10px 0">'+(lang==='en'?'No records for this date/store.':'Tiada rekod.')+'</div>';
     } else {
-      // Fallback: just update ops dashboard
-      var opPanel=document.querySelector('[data-ops-panel]');
-      if(opPanel) opPanel.innerHTML=renderOperationsDashboard();
+      // Fallback: full re-render if panels not found
+      if(!_adminRendering) renderAdminTab();
     }
   }
   showToast(lang==='en'?'Attendance synced ✓':'Kehadiran disegerak ✓','success');
@@ -2992,7 +2994,7 @@ function shareMonthlyWhatsApp(month){
   lines.push('─────────────────────');
   lines.push('*'+(EN?'GRAND TOTAL: RM ':'JUMLAH KESELURUHAN: RM ')+grandTotal.toFixed(2)+'*');
   lines.push('');
-  lines.push('_Daily Sales Reporter V 4.8.0_');
+  lines.push('_Daily Sales Reporter V4.8_');
   var msg=lines.join('\n');
   // WhatsApp - check if recipient phone in email field
   var s2=getReportSettings();
@@ -3476,7 +3478,14 @@ async function _doAppLogin(userMatch){
     try{if(isBoss) renderSummaryTab(); else renderSubmitTab();}catch(e){}
     try{syncMalaysiaTime();}catch(e){}
     try{startNotifScheduler();}catch(e){}
-    try{saveData('attendance_records',[]);_serverAtt=[];_serverAttLoaded=false;fetchServerAttendance();}catch(e){}
+    try{
+      saveData('attendance_records',[]);
+      _serverAtt=[];
+      _serverAttLoaded=false;
+      // Admin gets attendance via fetchAdminData (all companies) in renderAdminTab
+      // Non-admin fetches here
+      if(!currentUser||currentUser.role!=='admin') fetchServerAttendance();
+    }catch(e){}
     try{fetchLeavesFromCentral();}catch(e){}
     if(WEB_APP_URL&&WEB_APP_URL.length>20){
       try{recordLoginDevice();}catch(e){}
@@ -5967,7 +5976,6 @@ async function renderAdminTab() {
     // ONE fetch per company — much faster
     await Promise.all([fetchLiveUsers(true), fetchAdminData()]);
     if(_myRenderId!==_adminRenderSeq){ _adminRendering=false; return; }
-
     const allUsers=cachedUsers;
     const pending=[]; const active=[]; const resigned=[];
     var _userCompanyFilter=window._userCompanyFilter||_activeCompany||'all';
@@ -6055,7 +6063,9 @@ async function renderAdminTab() {
         <h2 style="font-size:18px;font-weight:900">${t('adminTab')}</h2>
         <button class="btn refresh-inline" onclick="renderAdminTab()">${t('refresh')}</button>
       </div>
+      <div data-ops-panel>
       ${renderOperationsDashboard()}
+      </div>
       ${canManageUsers()?pendingHtml:''}
       ${canManageUsers()?`
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
@@ -6077,13 +6087,29 @@ async function renderAdminTab() {
 
     if(hasPerm('role_perm')) renderPermissionsPanel();
     if(hasPerm('monthly_report')) renderMonthlyReportPanel();
-    // Pre-load zone for first store (no full sync — avoids re-render loop)
+    // Pre-load zone for first store
     if(currentUser.role==='admin'&&hasPerm('work_zone')){
       setTimeout(function(){
         var fs=document.getElementById('zone-store');
         if(fs&&fs.value&&typeof loadZoneForStore==='function') loadZoneForStore(fs.value);
       },500);
     }
+    // Update ops panel counts — fetchAdminData already loaded fresh attendance
+    // so re-render now that _serverAtt is populated with all companies
+    setTimeout(function(){
+      var opsPanel=document.querySelector('[data-ops-panel]');
+      if(opsPanel) opsPanel.innerHTML=renderOperationsDashboard();
+      var attPanel=document.querySelector('[data-att-panel]');
+      if(attPanel){
+        var att=getAllAttendance().filter(function(r){
+          return r.dateKey===attendanceDateFilter&&
+            (attendanceStoreFilter==='all'||r.store===attendanceStoreFilter);
+        }).sort(function(a,b){return String(b.datetime).localeCompare(String(a.datetime));});
+        attPanel.innerHTML=att.length
+          ?att.map(attendanceRowHtml).join('')
+          :'<div style="font-size:13px;color:var(--text2);padding:10px 0">'+(lang==='en'?'No records for this date/store.':'Tiada rekod.')+'</div>';
+      }
+    },100);
   }catch(err){
     var errMsg=err.message||String(err);
     var stack=(err.stack||'').split('\n').slice(0,8).join('\n');
