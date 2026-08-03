@@ -3015,6 +3015,7 @@ async function triggerSyncRefresh() {
 
   if(isAdminRole&&companyNames.length>0){
     try{
+      var myGen = ++_attFetchGen; // claim generation before any await
       var allSales=[], allAtt=[], allSettlements=[], allLocks=[], allApprovals=[];
       var allZones=[], allScheds=[], allBackups=[];
 
@@ -3057,7 +3058,7 @@ async function triggerSyncRefresh() {
 
       // Save merged data
       if(allSales.length>0) saveSales(allSales);
-      if(allAtt.length>0){ _setServerAtt(allAtt, _attFetchGen); }
+      if(allAtt.length>0){ _setServerAtt(allAtt, myGen); }  // use myGen not _attFetchGen
       if(allSettlements.length>0) saveSettlementsData(allSettlements);
       if(allLocks.length>0) saveSettlementLocks(allLocks);
       if(allApprovals.length>0) saveApprovals(allApprovals);
@@ -3077,6 +3078,7 @@ async function triggerSyncRefresh() {
   }
 
   // Non-admin: sync from active company only (original behaviour)
+  var myGen2 = ++_attFetchGen; // claim generation for non-admin sync
   var url=gasUrlFor(_activeCompany)||WEB_APP_URL;
   if(!url||url.length<20){showToast('No GAS URL configured','error');if(btn)btn.textContent='🔄';return;}
   try {
@@ -3088,7 +3090,7 @@ async function triggerSyncRefresh() {
 
     if(newSales!==null){
       saveSales(newSales);
-      if(currentTab!=='admin') renderCurrentTab(); // admin re-renders itself after fetchAdminData
+      if(currentTab!=='admin') renderCurrentTab();
       checkAllStoresSubmitted();
       showToast(lang==='zh'?'云端同步成功 ✓':'Synced from Cloud ✓','success');
       try{
@@ -3099,11 +3101,8 @@ async function triggerSyncRefresh() {
           if(Array.isArray(appJson.approvals))       saveApprovals(appJson.approvals);
           if(Array.isArray(appJson.settlements))     saveSettlementsData(appJson.settlements);
           if(Array.isArray(appJson.attendance)){
-            _setServerAtt(appJson.attendance, _attFetchGen);
-            saveData('attendance_records',[]);
+            _setServerAtt(appJson.attendance, myGen2); // use myGen2 not _attFetchGen
             if(currentTab==='attendance') renderAttendanceTab();
-            // Do NOT call renderAdminTab here — it causes recursion
-            // Admin attendance updates via fetchAdminData which is called from renderAdminTab directly
           }
           if(Array.isArray(appJson.workZones))     saveWorkZones(appJson.workZones);
           if(Array.isArray(appJson.workSchedules)) saveWorkSchedules(appJson.workSchedules);
@@ -4384,15 +4383,9 @@ function renderAttendanceTab(){
   if(attTab&&!_serverAttLoaded) attTab.innerHTML='<div class="spinner-wrap"><div class="spin"></div>'+(lang==='en'?'Loading attendance...':'Memuatkan kehadiran...')+'</div>';
   // Show cached data immediately
   _renderAttendanceContent();
-  // Fetch fresh from ALL companies (admin) or active company (staff)
-  // fetchServerAttendance handles multi-company routing correctly
+  // fetchServerAttendance handles multi-company routing + generation counter
   fetchServerAttendance().then(function(){
-    _serverAttLoaded=true;
-    // Merge any local session records not yet on server
-    var sIds=new Set(_serverAtt.map(function(r){return String(r.id);}));
-    _attSession.forEach(function(r){
-      if(!sIds.has(String(r.id))) _serverAtt.push(r);
-    });
+    // Merge session records not yet on server (in-memory only, don't overwrite _serverAtt)
     _renderAttendanceContent();
   }).catch(function(){
     _renderAttendanceContent();
@@ -5899,6 +5892,8 @@ async function createDatabaseBackup(){
 var _adminRenderSeq=0;
 // Single fetch per company — attendance + approvals + settlements in one call
 async function fetchAdminData(){
+  var myGen = ++_attFetchGen; // claim generation — older fetches that finish later are discarded
+
   var companies=(_centralUser&&_centralUser.companies)||{};
 
   // Build URL list — include ALL known companies + WEB_APP_URL fallback
@@ -5932,7 +5927,8 @@ async function fetchAdminData(){
     }catch(e2){}
   }));
 
-  if(allAtt.length>0)        {_setServerAtt(allAtt, _attFetchGen);}
+  // Only write if we are still the latest fetch
+  if(allAtt.length>0) _setServerAtt(allAtt, myGen);
   if(allApprovals.length>0)   saveApprovals(allApprovals);
   if(allSettlements.length>0) saveSettlementsData(allSettlements);
   if(allLocks.length>0)       saveSettlementLocks(allLocks);
