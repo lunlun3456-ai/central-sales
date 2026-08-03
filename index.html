@@ -762,7 +762,7 @@
         <!-- version -->
         <text x="314" y="216"
           font-family="system-ui,-apple-system,sans-serif"
-          font-weight="600" font-size="9" fill="#cbd5e1" text-anchor="end">V4.8</text>
+          font-weight="600" font-size="9" fill="#cbd5e1" text-anchor="end">V 4.8.0</text>
 
       </svg>
     </div><!-- /login-logo -->
@@ -827,7 +827,7 @@
         <!-- by ki -->
         <text x="34" y="28" font-family="system-ui,-apple-system,sans-serif" font-weight="700" font-size="9" fill="rgba(255,255,255,0.45)" font-style="italic">by ki</text>
         <!-- version -->
-        <text x="198" y="34" font-family="system-ui,-apple-system,sans-serif" font-weight="600" font-size="7.5" fill="rgba(255,255,255,0.5)" text-anchor="end">V4.8</text>
+        <text x="198" y="34" font-family="system-ui,-apple-system,sans-serif" font-weight="600" font-size="7.5" fill="rgba(255,255,255,0.5)" text-anchor="end">V 4.8.0</text>
       </svg>
       <div class="sub" id="app-user-info"></div>
     </div>
@@ -1569,7 +1569,7 @@ const T = {
     selectStoreFrst:'请先选择门店',
     latLngRequired:'请输入经纬度坐标',
     zoneSaved:'区域已保存。',
-    // ── Additional zh keys V4.8 ──
+    // ── Additional zh keys V 4.8.0 ──
     totalSalesLabel:'总销售额',storeLabel:'门店',dateLabel2:'日期',
     updateSalesBtn:'📝 更新销售',confirmDailyBtn:'📎 确认每日销售 (上传收据)',
     requestApprovalBtn:'📋 申请结算审批',
@@ -2994,7 +2994,7 @@ function shareMonthlyWhatsApp(month){
   lines.push('─────────────────────');
   lines.push('*'+(EN?'GRAND TOTAL: RM ':'JUMLAH KESELURUHAN: RM ')+grandTotal.toFixed(2)+'*');
   lines.push('');
-  lines.push('_Daily Sales Reporter V4.8_');
+  lines.push('_Daily Sales Reporter V 4.8.0_');
   var msg=lines.join('\n');
   // WhatsApp - check if recipient phone in email field
   var s2=getReportSettings();
@@ -3378,12 +3378,14 @@ function _enterApp(cr,pin){
         // Find nearest zone
         var nearest=storeZones.map(function(z){
           return {
-            radiusMeters:parseFloat(z.radiusMeters)||500,
+            radiusMeters:parseFloat(z.radiusMeters)||200,
             distanceMeters:distanceMeters(lat,lng,parseFloat(z.latitude),parseFloat(z.longitude))
           };
         }).sort(function(a,b){return a.distanceMeters-b.distanceMeters;})[0];
 
-        if(nearest&&nearest.distanceMeters>(nearest.radiusMeters+50)){
+        // Use GPS accuracy as buffer (not hardcoded 50m) — respects admin's exact radius setting
+        var gpsBuf=Math.max(0,Math.round((acc||30)-20)); // subtract 20m from accuracy as base tolerance
+        if(nearest&&nearest.distanceMeters>(nearest.radiusMeters+gpsBuf)){
           // Outside zone — block login
           var dist=nearest.distanceMeters;
           var max=nearest.radiusMeters;
@@ -4899,7 +4901,8 @@ function saveLeaveFromModal(){
           var lat=pos.coords.latitude, lng=pos.coords.longitude;
           var acc=Math.round(pos.coords.accuracy||99);
           var zone=nearestLocalZone(currentUser.store,lat,lng);
-          if(zone&&zone.distanceMeters>(zone.radiusMeters+50)){
+          var leaveGpsBuf=Math.max(0,Math.round((acc||30)-20));
+          if(zone&&zone.distanceMeters>(zone.radiusMeters+leaveGpsBuf)){
             // Outside zone
             showToast((EN?'You are outside work zone (':'Anda di luar zon kerja (')+zone.distanceMeters+'m, max '+zone.radiusMeters+'m)','error');
             return;
@@ -5163,7 +5166,18 @@ function _ipLoc(resolve){
       .then(function(d){if(d.loc){var p=d.loc.split(',');resolve({lat:parseFloat(p[0]),lng:parseFloat(p[1]),accuracy:5000,source:'ip2'});}else throw 0;})
       .catch(function(){resolve({lat:0,lng:0,accuracy:9999,source:'unavailable'});});});
 }
-function nearestLocalZone(store,lat,lng){ const zones=(cachedWorkZones.length?cachedWorkZones:loadData('work_zones',[])).filter(z=>z.store===store&&String(z.status||'active')==='active'); if(!zones.length) return null; return zones.map(z=>({radiusMeters:parseFloat(z.radiusMeters)||500,distanceMeters:distanceMeters(lat,lng,parseFloat(z.latitude),parseFloat(z.longitude))})).sort((a,b)=>a.distanceMeters-b.distanceMeters)[0]; }
+function nearestLocalZone(store,lat,lng){
+  var zones=(cachedWorkZones.length?cachedWorkZones:loadData('work_zones',[])).filter(function(z){
+    return z.store===store&&String(z.status||'active')==='active';
+  });
+  if(!zones.length) return null;
+  return zones.map(function(z){
+    return {
+      radiusMeters:parseFloat(z.radiusMeters)||200, // use saved value, default 200
+      distanceMeters:distanceMeters(lat,lng,parseFloat(z.latitude),parseFloat(z.longitude))
+    };
+  }).sort(function(a,b){return a.distanceMeters-b.distanceMeters;})[0];
+}
 function distanceMeters(lat1,lon1,lat2,lon2){ const R=6371000,toRad=n=>n*Math.PI/180,dLat=toRad(lat2-lat1),dLon=toRad(lon2-lon1),a=Math.sin(dLat/2)**2+Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2; return Math.round(R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a))); }
 function showAttResetModal(username,dateKey,recordId,type,timeStr){
   var e2=document.getElementById('att-reset-modal'); if(e2) e2.remove();
@@ -5823,7 +5837,7 @@ async function saveWorkZoneFromForm(){
   // Update local cache immediately
   var zones=cachedWorkZones.filter(function(z){return z.store!==zoneStore;});
   zones.push({store:zoneStore,latitude:payload.latitude,longitude:payload.longitude,
-    radiusMeters:payload.radiusMeters||500,status:'active',label:zoneStore});
+    radiusMeters:parseFloat(payload.radiusMeters)||200,status:'active',label:zoneStore});
   saveWorkZones(zones);
   showToast('Zone saved for '+zoneStore+' ✅','success');
   // Sync back to verify
