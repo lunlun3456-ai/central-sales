@@ -762,7 +762,7 @@
         <!-- version -->
         <text x="314" y="216"
           font-family="system-ui,-apple-system,sans-serif"
-          font-weight="600" font-size="9" fill="#cbd5e1" text-anchor="end">V 4.8.0</text>
+          font-weight="600" font-size="9" fill="#cbd5e1" text-anchor="end">v 4.8</text>
 
       </svg>
     </div><!-- /login-logo -->
@@ -827,7 +827,7 @@
         <!-- by ki -->
         <text x="34" y="28" font-family="system-ui,-apple-system,sans-serif" font-weight="700" font-size="9" fill="rgba(255,255,255,0.45)" font-style="italic">by ki</text>
         <!-- version -->
-        <text x="198" y="34" font-family="system-ui,-apple-system,sans-serif" font-weight="600" font-size="7.5" fill="rgba(255,255,255,0.5)" text-anchor="end">V 4.8.0</text>
+        <text x="198" y="34" font-family="system-ui,-apple-system,sans-serif" font-weight="600" font-size="7.5" fill="rgba(255,255,255,0.5)" text-anchor="end">v 4.8</text>
       </svg>
       <div class="sub" id="app-user-info"></div>
     </div>
@@ -1569,7 +1569,7 @@ const T = {
     selectStoreFrst:'请先选择门店',
     latLngRequired:'请输入经纬度坐标',
     zoneSaved:'区域已保存。',
-    // ── Additional zh keys V 4.8.0 ──
+    // ── Additional zh keys v 4.8 ──
     totalSalesLabel:'总销售额',storeLabel:'门店',dateLabel2:'日期',
     updateSalesBtn:'📝 更新销售',confirmDailyBtn:'📎 确认每日销售 (上传收据)',
     requestApprovalBtn:'📋 申请结算审批',
@@ -2335,56 +2335,93 @@ function applyPermissionsToNav(){
   });
 }
 
-// ── Server-first Attendance (no localStorage) ──────────────────────────────
-var _serverAtt = [];   // fetched from GAS, in-memory only
+// ── Server-first Attendance — per-company accumulator ─────────────────────
+var _serverAtt = [];         // merged view of all companies
 var _serverAttLoaded = false;
-var _attFetchGen = 0; // increments each fetch — only latest fetch may write _serverAtt
+var _attFetchGen = 0;        // used only to avoid duplicate concurrent fetches
+var _attByCompany = {};      // { companyName: [records...] } — per-company cache
 
-// Safe setter — only writes if this fetch is still the latest
+// Merge all per-company arrays into _serverAtt
+function _rebuildServerAtt(){
+  var merged = [];
+  Object.keys(_attByCompany).forEach(function(co){
+    var recs = _attByCompany[co] || [];
+    recs.forEach(function(r){ r._company = co; merged.push(r); });
+  });
+  // Also add session records not yet in any company cache
+  var serverIds = new Set(merged.map(function(r){ return String(r.id); }));
+  _attSession.forEach(function(r){
+    if(!serverIds.has(String(r.id))) merged.push(r);
+  });
+  _serverAtt = merged;
+  _serverAttLoaded = Object.keys(_attByCompany).length > 0;
+}
+
+// Update one company's records and immediately rebuild the merged view
+function _updateCompanyAtt(company, records){
+  if(!Array.isArray(records)||records.length===0) return;
+  _attByCompany[company] = records;
+  _rebuildServerAtt();
+}
+
+// Legacy setter — kept for compatibility, merges into the accumulator
 function _setServerAtt(arr, myGen){
-  if(myGen < _attFetchGen) return; // stale fetch — discard
-  _serverAtt = arr;
-  _serverAttLoaded = true;
+  // Don't use generation check — just accumulate by company
+  if(!Array.isArray(arr)||arr.length===0) return;
+  // Group incoming records by company
+  var byCompany = {};
+  arr.forEach(function(r){
+    var co = r._company || _activeCompany || 'unknown';
+    if(!byCompany[co]) byCompany[co] = [];
+    byCompany[co].push(r);
+  });
+  Object.keys(byCompany).forEach(function(co){
+    _attByCompany[co] = byCompany[co];
+  });
+  _rebuildServerAtt();
   saveData('attendance_records', []);
 }
 
-async function fetchServerAttendance(){
-  // Claim this generation — any older fetches that finish later are discarded
-  var myGen = ++_attFetchGen;
+var _attFetching = {}; // { url: true } — prevent duplicate concurrent fetches for same URL
 
-  // Build URL list — admin gets ALL companies, others get active company only
-  var urlMap={};
-  if(currentUser&&currentUser.role==='admin'){
-    var companies=(_centralUser&&_centralUser.companies)||{};
+async function fetchServerAttendance(){
+  // Build URL list
+  var urlMap = {};
+  if(currentUser && currentUser.role === 'admin'){
+    var companies = (_centralUser && _centralUser.companies) || {};
     Object.keys(companies).forEach(function(co){
-      var url=String(companies[co]||'').trim();
-      if(url&&!url.includes('PASTE_')&&url.length>20) urlMap[url]=co;
+      var url = String(companies[co]||'').trim();
+      if(url && !url.includes('PASTE_') && url.length > 20) urlMap[url] = co;
     });
   }
-  // Always include WEB_APP_URL (hardcoded active company — IS LEATHER or current)
-  if(WEB_APP_URL&&WEB_APP_URL.length>20&&!WEB_APP_URL.includes('PASTE_')){
-    if(!urlMap[WEB_APP_URL]) urlMap[WEB_APP_URL]=_activeCompany||'Company';
+  // Always include WEB_APP_URL
+  if(WEB_APP_URL && WEB_APP_URL.length > 20 && !WEB_APP_URL.includes('PASTE_')){
+    if(!urlMap[WEB_APP_URL]) urlMap[WEB_APP_URL] = _activeCompany || 'Company';
   }
 
-  var urlList=Object.keys(urlMap).map(function(url){return {url:url,co:urlMap[url]};});
-  if(urlList.length===0) return;
+  var urlList = Object.keys(urlMap).map(function(url){ return {url:url, co:urlMap[url]}; });
+  if(urlList.length === 0) return;
 
-  var allAtt=[];
+  // Fetch each company independently — each updates as soon as it responds
+  // No generation counter — accumulator approach means no fetch can erase another
   await Promise.all(urlList.map(async function(e){
+    if(_attFetching[e.url]) return; // skip if already fetching this URL
+    _attFetching[e.url] = true;
     try{
-      var resp=await fetchWithTimeout(
-        e.url+'?action=getAttendance&t='+Date.now(),
-        {method:'GET',cache:'no-cache'},10000);
-      var r=await resp.json();
-      var arr=(r&&Array.isArray(r.attendance))?r.attendance:(Array.isArray(r)?r:[]);
-      arr.forEach(function(a){a._company=e.co; allAtt.push(a);});
-    }catch(e2){}
+      var resp = await fetchWithTimeout(
+        e.url + '?action=getAttendance&t=' + Date.now(),
+        {method:'GET', cache:'no-cache'}, 12000);
+      var r = await resp.json();
+      var arr = (r && Array.isArray(r.attendance)) ? r.attendance : (Array.isArray(r) ? r : []);
+      if(arr.length > 0){
+        _updateCompanyAtt(e.co, arr); // immediately updates merged _serverAtt
+        saveData('attendance_records', []);
+      }
+    }catch(e2){
+    }finally{
+      _attFetching[e.url] = false;
+    }
   }));
-
-  // Only write if we are still the latest fetch (not superseded)
-  if(myGen===_attFetchGen && allAtt.length>0){
-    _setServerAtt(allAtt, myGen);
-  }
 }
 
 function getAllAttendance(){
@@ -2994,7 +3031,7 @@ function shareMonthlyWhatsApp(month){
   lines.push('─────────────────────');
   lines.push('*'+(EN?'GRAND TOTAL: RM ':'JUMLAH KESELURUHAN: RM ')+grandTotal.toFixed(2)+'*');
   lines.push('');
-  lines.push('_Daily Sales Reporter V 4.8.0_');
+  lines.push('_Daily Sales Reporter v 4.8_');
   var msg=lines.join('\n');
   // WhatsApp - check if recipient phone in email field
   var s2=getReportSettings();
@@ -3017,8 +3054,7 @@ async function triggerSyncRefresh() {
 
   if(isAdminRole&&companyNames.length>0){
     try{
-      var myGen = ++_attFetchGen; // claim generation before any await
-      var allSales=[], allAtt=[], allSettlements=[], allLocks=[], allApprovals=[];
+      var allSales=[], allApprovals2=[], allSettlements2=[], allLocks2=[];
       var allZones=[], allScheds=[], allBackups=[];
 
       // Deduplicate URLs + always include WEB_APP_URL
@@ -3045,10 +3081,10 @@ async function triggerSyncRefresh() {
           var r2=await fetch(url+'?action=getAppData&t='+Date.now(),{method:'GET',cache:'no-cache'});
           var d2=await r2.json();
           if(d2){
-            if(Array.isArray(d2.attendance))       d2.attendance.forEach(function(a){a._company=co;allAtt.push(a);});
-            if(Array.isArray(d2.settlements))       d2.settlements.forEach(function(s){s._company=co;allSettlements.push(s);});
-            if(Array.isArray(d2.settlementLocks))   d2.settlementLocks.forEach(function(l){l._company=co;allLocks.push(l);});
-            if(Array.isArray(d2.approvals))         d2.approvals.forEach(function(a){a._company=co;allApprovals.push(a);});
+            if(Array.isArray(d2.attendance)&&d2.attendance.length>0){ _updateCompanyAtt(co,d2.attendance); saveData('attendance_records',[]); }
+            if(Array.isArray(d2.settlements))     d2.settlements.forEach(function(s){s._company=co;allSettlements2.push(s);});
+            if(Array.isArray(d2.settlementLocks)) d2.settlementLocks.forEach(function(l){l._company=co;allLocks2.push(l);});
+            if(Array.isArray(d2.approvals))       d2.approvals.forEach(function(a){a._company=co;allApprovals2.push(a);});
             if(Array.isArray(d2.workZones))         d2.workZones.forEach(function(z){z._company=co;allZones.push(z);});
             if(Array.isArray(d2.workSchedules))     d2.workSchedules.forEach(function(s){s._company=co;allScheds.push(s);});
             if(Array.isArray(d2.backups))           d2.backups.forEach(function(b){b._company=co;allBackups.push(b);});
@@ -3060,10 +3096,10 @@ async function triggerSyncRefresh() {
 
       // Save merged data
       if(allSales.length>0) saveSales(allSales);
-      if(allAtt.length>0){ _setServerAtt(allAtt, myGen); }  // use myGen not _attFetchGen
-      if(allSettlements.length>0) saveSettlementsData(allSettlements);
-      if(allLocks.length>0) saveSettlementLocks(allLocks);
-      if(allApprovals.length>0) saveApprovals(allApprovals);
+      // Attendance already updated per-company via _updateCompanyAtt above
+      if(allSettlements2.length>0) saveSettlementsData(allSettlements2);
+      if(allLocks2.length>0) saveSettlementLocks(allLocks2);
+      if(allApprovals2.length>0) saveApprovals(allApprovals2);
       if(allZones.length>0) saveWorkZones(allZones);
       if(allScheds.length>0) saveWorkSchedules(allScheds);
       if(allBackups.length>0) saveBackups(allBackups);
@@ -3080,7 +3116,6 @@ async function triggerSyncRefresh() {
   }
 
   // Non-admin: sync from active company only (original behaviour)
-  var myGen2 = ++_attFetchGen; // claim generation for non-admin sync
   var url=gasUrlFor(_activeCompany)||WEB_APP_URL;
   if(!url||url.length<20){showToast('No GAS URL configured','error');if(btn)btn.textContent='🔄';return;}
   try {
@@ -3103,7 +3138,8 @@ async function triggerSyncRefresh() {
           if(Array.isArray(appJson.approvals))       saveApprovals(appJson.approvals);
           if(Array.isArray(appJson.settlements))     saveSettlementsData(appJson.settlements);
           if(Array.isArray(appJson.attendance)){
-            _setServerAtt(appJson.attendance, myGen2); // use myGen2 not _attFetchGen
+            _updateCompanyAtt(_activeCompany||'Company', appJson.attendance);
+            saveData('attendance_records',[]);
             if(currentTab==='attendance') renderAttendanceTab();
           }
           if(Array.isArray(appJson.workZones))     saveWorkZones(appJson.workZones);
@@ -5915,8 +5951,6 @@ async function createDatabaseBackup(){
 var _adminRenderSeq=0;
 // Single fetch per company — attendance + approvals + settlements in one call
 async function fetchAdminData(){
-  var myGen = ++_attFetchGen; // claim generation — older fetches that finish later are discarded
-
   var companies=(_centralUser&&_centralUser.companies)||{};
 
   // Build URL list — include ALL known companies + WEB_APP_URL fallback
@@ -5933,25 +5967,33 @@ async function fetchAdminData(){
   var urls=Object.keys(urlMap).map(function(url){return {url:url,co:urlMap[url]};});
   if(urls.length===0) return;
 
-  var allAtt=[]; var allApprovals=[]; var allSettlements=[]; var allLocks=[];
+  var allApprovals=[]; var allSettlements=[]; var allLocks=[];
 
   await Promise.all(urls.map(async function(e){
+    if(_attFetching[e.url]) return;
+    _attFetching[e.url]=true;
     try{
       var resp=await fetchWithTimeout(e.url+'?action=getAppData&t='+Date.now(),
-        {method:'GET',cache:'no-cache'},10000);
+        {method:'GET',cache:'no-cache'},12000);
       var d=await resp.json();
       if(!d) return;
-      if(Array.isArray(d.attendance))      d.attendance.forEach(function(a){a._company=e.co;allAtt.push(a);});
+      // Update this company's attendance immediately — don't wait for all companies
+      if(Array.isArray(d.attendance)&&d.attendance.length>0){
+        _updateCompanyAtt(e.co, d.attendance);
+        saveData('attendance_records',[]);
+      }
       if(Array.isArray(d.approvals))       d.approvals.forEach(function(a){a._company=e.co;allApprovals.push(a);});
       if(Array.isArray(d.settlements))     d.settlements.forEach(function(s){s._company=e.co;allSettlements.push(s);});
       if(Array.isArray(d.settlementLocks)) d.settlementLocks.forEach(function(l){l._company=e.co;allLocks.push(l);});
       if(d.rolePermissions&&typeof d.rolePermissions==='object') savePerms(d.rolePermissions);
       if(d.storePermissions&&typeof d.storePermissions==='object') saveStorePerms(d.storePermissions);
-    }catch(e2){}
+    }catch(e2){
+    }finally{
+      _attFetching[e.url]=false;
+    }
   }));
 
-  // Only write if we are still the latest fetch
-  if(allAtt.length>0) _setServerAtt(allAtt, myGen);
+  // Approvals/settlements use bulk since they don't need per-company merging
   if(allApprovals.length>0)   saveApprovals(allApprovals);
   if(allSettlements.length>0) saveSettlementsData(allSettlements);
   if(allLocks.length>0)       saveSettlementLocks(allLocks);
